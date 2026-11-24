@@ -301,11 +301,6 @@ $('delBtn').addEventListener('click', () => {
     }, (id) => id === 'del' && go());
   } else if (confirm(`«${t.title}» ўчирилсинми?`)) go();
 });
-// На десктопе Chromium выбор времени открывается только значком, который скрыт стилем —
-// открываем его по нажатию на само поле.
-$('sheet').elements.time.addEventListener('click', (e) => {
-  try { e.target.showPicker(); } catch (_) {}
-});
 $('cancelBtn').addEventListener('click', closeEditor);
 $('sheetBg').addEventListener('click', closeEditor);
 $('addBtn').addEventListener('click', () => openEditor(null));

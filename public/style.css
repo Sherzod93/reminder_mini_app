@@ -213,9 +213,11 @@ main { padding: 0 0 16px; }
 }
 .row-time {
   background: var(--fill); color: var(--label); border-radius: 6px; padding: 5px 10px;
-  font-variant-numeric: tabular-nums; text-align: center; max-width: none; width: auto;
+  font-variant-numeric: tabular-nums; text-align: center; max-width: none; width: auto; cursor: text;
 }
-.row-time::-webkit-calendar-picker-indicator { display: none; }
+/* Значок часов оставлен: щелчок по цифрам — ввод с клавиатуры, по значку — окно выбора. */
+.row-time::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; margin-left: 6px; padding: 0; }
+:root[data-theme="dark"] .row-time::-webkit-calendar-picker-indicator { filter: invert(1); }
 .row-select option { color: #000; }
 .row-input {
   width: 100%; border: 0; background: transparent; color: var(--label);
