@@ -64,13 +64,14 @@ function state(int $uid): array
     $u->execute([$uid]);
     $u = $u->fetch();
 
-    $t = db()->prepare('SELECT id, title, note, time, days, remind_before, enabled FROM tasks WHERE user_id = ? ORDER BY time, id');
+    $t = db()->prepare('SELECT id, title, note, time, end_time, days, remind_before, enabled FROM tasks WHERE user_id = ? ORDER BY time, id');
     $t->execute([$uid]);
     $tasks = array_map(fn ($r) => [
         'id'            => (int) $r['id'],
         'title'         => $r['title'],
         'note'          => $r['note'],
         'time'          => $r['time'],
+        'end_time'      => $r['end_time'],
         'days'          => $r['days'],
         'remind_before' => (int) $r['remind_before'],
         'enabled'       => (bool) $r['enabled'],
@@ -109,6 +110,7 @@ function task_save(int $uid, array $in): void
     $title = trim((string) ($in['title'] ?? ''));
     $note = trim((string) ($in['note'] ?? ''));
     $time = (string) ($in['time'] ?? '');
+    $end = (string) ($in['end_time'] ?? '');
     $days = implode('', array_unique(str_split(preg_replace('/[^1-7]/', '', (string) ($in['days'] ?? '')))));
     $before = (int) ($in['remind_before'] ?? 0);
     $enabled = (int) (bool) ($in['enabled'] ?? true);
@@ -122,6 +124,10 @@ function task_save(int $uid, array $in): void
     if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)) {
         throw new InvalidArgumentException('time');
     }
+    // Окончание необязательно; если задано — в тот же день и позже начала.
+    if ($end !== '' && (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $end) || $end <= $time)) {
+        throw new InvalidArgumentException('end_time');
+    }
     if ($days === '') {
         throw new InvalidArgumentException('days');
     }
@@ -134,13 +140,13 @@ function task_save(int $uid, array $in): void
 
     $id = (int) ($in['id'] ?? 0);
     if ($id > 0) {
-        $st = db()->prepare('UPDATE tasks SET title = ?, note = ?, time = ?, days = ?, remind_before = ?, enabled = ? WHERE id = ? AND user_id = ?');
-        $st->execute([$title, $note, $time, $days, $before, $enabled, $id, $uid]);
+        $st = db()->prepare('UPDATE tasks SET title = ?, note = ?, time = ?, end_time = ?, days = ?, remind_before = ?, enabled = ? WHERE id = ? AND user_id = ?');
+        $st->execute([$title, $note, $time, $end, $days, $before, $enabled, $id, $uid]);
         if ($st->rowCount() === 0) {
             throw new InvalidArgumentException('task not found');
         }
         // Время поменяли — разрешаем напомнить сегодня ещё раз.
-        db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref = ? AND date = ?')->execute([$uid, "t:$id", today()]);
+        db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref IN (?, ?) AND date = ?')->execute([$uid, "t:$id", "e:$id", today()]);
         db()->prepare('DELETE FROM skipped WHERE user_id = ? AND ref = ? AND date = ?')->execute([$uid, "t:$id", today()]);
         return;
     }
@@ -150,8 +156,8 @@ function task_save(int $uid, array $in): void
     if ((int) $cnt->fetchColumn() >= (int) cfg('max_tasks')) {
         throw new InvalidArgumentException('too many tasks');
     }
-    db()->prepare('INSERT INTO tasks (user_id, title, note, time, days, remind_before, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$uid, $title, $note, $time, $days, $before, $enabled]);
+    db()->prepare('INSERT INTO tasks (user_id, title, note, time, end_time, days, remind_before, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$uid, $title, $note, $time, $end, $days, $before, $enabled]);
 }
 
 function task_delete(int $uid, array $in): void
@@ -159,7 +165,7 @@ function task_delete(int $uid, array $in): void
     $id = (int) ($in['id'] ?? 0);
     db()->prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?')->execute([$id, $uid]);
     db()->prepare('DELETE FROM done WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
-    db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
+    db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref IN (?, ?)')->execute([$uid, "t:$id", "e:$id"]);
     db()->prepare('DELETE FROM skipped WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
 }
 

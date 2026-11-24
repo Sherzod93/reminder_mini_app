@@ -116,6 +116,12 @@ function db_migrate(PDO $pdo): void
         );
     SQL);
 
+    // Время окончания задачи (HH:MM, пусто — без окончания): повторы идут до него.
+    $taskCols = array_column($pdo->query('PRAGMA table_info(tasks)')->fetchAll(), 'name');
+    if (!in_array('end_time', $taskCols, true)) {
+        $pdo->exec("ALTER TABLE tasks ADD COLUMN end_time TEXT NOT NULL DEFAULT ''");
+    }
+
     // Повторные напоминания: когда слали последний раз, id сообщения, сколько повторов.
     $cols = array_column($pdo->query('PRAGMA table_info(sent)')->fetchAll(), 'name');
     if (!in_array('last_at', $cols, true)) {

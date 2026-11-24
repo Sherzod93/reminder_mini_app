@@ -90,6 +90,38 @@ $process = static function (int $uid, string $ref, string $hhmm, int $beforeMin,
 
 $beforeText = static fn (int $min): string => $min > 0 ? " ({$min} дақиқадан сўнг)" : '';
 
+/**
+ * Время окончания задачи наступило, а она не отмечена — одно «⌛ вақти тугади». Только если о
+ * задаче сегодня уже напоминали. Отметка отправки — строка e:<id> в sent; кнопки и msg_id
+ * переходят к t:<id>, чтобы «Бажарилди» в приложении снимал их и с этого сообщения.
+ */
+$finish = static function (int $uid, int $taskId, string $title, string $hhmm)
+    use ($q, $now, $today, $window, $buttons, &$stat): void {
+    $endAt = strtotime("$today $hhmm");
+    $ref = "t:$taskId";
+    if ($now < $endAt || $now - $endAt >= $window) {
+        return;
+    }
+    $main = $q('SELECT msg_id FROM sent WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch();
+    if (!$main
+        || $q('SELECT 1 FROM done WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch()
+        || $q('SELECT 1 FROM skipped WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch()) {
+        return;
+    }
+    $ins = $q('INSERT OR IGNORE INTO sent (user_id, ref, date, last_at) VALUES (?, ?, ?, ?)', [$uid, "e:$taskId", $today, $now]);
+    if ($ins->rowCount() !== 1) {
+        return;
+    }
+    if ($main['msg_id']) {
+        tg_api('deleteMessage', ['chat_id' => $uid, 'message_id' => (int) $main['msg_id']]);
+    }
+    $res = tg_send($uid, "⌛ <b>" . h($title) . "</b> вақти тугади ({$hhmm})\nБажардингизми?", $buttons($ref, false));
+    if (!empty($res['ok'])) {
+        $q('UPDATE sent SET msg_id = ? WHERE user_id = ? AND ref = ? AND date = ?', [(int) $res['result']['message_id'], $uid, $ref, $today]);
+    }
+    $stat['repeat']++;
+};
+
 $namaz = namaz_today();
 if ($namaz && $namaz['stale']) {
     $namaz = null; // не шлём намаз по вчерашнему времени
@@ -115,18 +147,24 @@ foreach ($users as $u) {
     $uid = (int) $u['id'];
 
     // Свои задачи
-    $tasks = $q('SELECT id, title, note, time, days, remind_before FROM tasks WHERE user_id = ? AND enabled = 1', [$uid])->fetchAll();
+    $tasks = $q('SELECT id, title, note, time, end_time, days, remind_before FROM tasks WHERE user_id = ? AND enabled = 1', [$uid])->fetchAll();
     foreach ($tasks as $t) {
         if (!str_contains($t['days'], $weekday)) {
             continue;
         }
         $before = (int) $t['remind_before'];
-        $process($uid, 't:' . $t['id'], $t['time'], $before, $endOfDay, false, static function (bool $repeat) use ($t, $before, $beforeText): string {
+        $range = $t['end_time'] !== '' ? "{$t['time']}–{$t['end_time']}" : $t['time'];
+        // С временем окончания повторы идут до него, без — до конца дня.
+        $until = $t['end_time'] !== '' ? strtotime("$today {$t['end_time']}") : $endOfDay;
+        $process($uid, 't:' . $t['id'], $t['time'], $before, $until, false, static function (bool $repeat) use ($t, $before, $beforeText, $range): string {
             $text = $repeat
-                ? "🔁 Ҳали бажарилмаган: <b>" . h($t['title']) . "</b>\n🕒 Вақти: " . $t['time']
-                : "⏰ <b>" . h($t['title']) . "</b>\n🕒 " . $t['time'] . $beforeText($before);
+                ? "🔁 Ҳали бажарилмаган: <b>" . h($t['title']) . "</b>\n🕒 Вақти: " . $range
+                : "⏰ <b>" . h($t['title']) . "</b>\n🕒 " . $range . $beforeText($before);
             return $t['note'] !== '' ? $text . "\n\n" . h($t['note']) : $text;
         });
+        if ($t['end_time'] !== '') {
+            $finish($uid, (int) $t['id'], $t['title'], $t['end_time']);
+        }
     }
 
     // Намаз

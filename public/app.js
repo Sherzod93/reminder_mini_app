@@ -111,7 +111,10 @@ function todayItems() {
   }
   for (const t of S.tasks) {
     if (!t.enabled || !t.days.includes(String(S.weekday))) continue;
-    items.push({ ref: `t:${t.id}`, time: t.time, title: t.title, note: t.note, task: t });
+    items.push({
+      ref: `t:${t.id}`, time: t.time, end: t.end_time || null, until: t.end_time || null,
+      title: t.title, note: t.note, task: t,
+    });
   }
   items.sort((a, b) => a.time.localeCompare(b.time) || (a.namaz ? -1 : 1));
   return items;
@@ -129,19 +132,22 @@ function renderToday() {
   for (const it of items) {
     const isDone = done.has(it.ref);
     const isSkipped = !isDone && skipped.has(it.ref);
-    const late = it.time < now;
+    const started = it.time < now;
+    const inProgress = !!it.end && started && it.end > now; // идёт сейчас — не просрочено
+    const late = started && !inProgress;
     let cls = 'row task' + (it.namaz ? ' namaz' : '') + (isDone ? ' done' : '') + (late ? ' late' : '') + (isSkipped ? ' skipped' : '');
-    if (!isDone && !late && !nextMarked) { cls += ' next'; nextMarked = true; }
+    if (!isDone && (inProgress || (!late && !nextMarked))) { cls += ' next'; nextMarked = true; }
 
-    const sub = [el('span', { class: 't' }, it.time)];
+    const sub = [el('span', { class: 't' }, it.end ? `${it.time}–${it.end}` : it.time)];
+    if (inProgress && !isDone) sub.push(' · ҳозир');
     if (isSkipped) sub.push(' · ⏭ Бугун ўтказилди');
     if (it.task && it.task.remind_before) sub.push(` · 🔔 ${beforeLabel(it.task.remind_before)}`);
     if (it.note) sub.push(` · ${it.note}`);
 
-    // Просроченное и не сделанное: «Ўтказиш» — сегодня больше не напоминать.
-    // Намаз повторяется только до начала следующего — после этого кнопка не нужна.
-    const stillReminded = !it.namaz || !it.until || it.until > now;
-    const pill = !isDone && late && stillReminded
+    // Началось и не сделано: «Ўтказиш» — сегодня больше не напоминать. Намаз напоминается до
+    // следующего намаза, задача с окончанием — до окончания; после этого кнопка не нужна.
+    const stillReminded = !it.until || it.until > now;
+    const pill = !isDone && started && stillReminded
       ? el('button', {
         class: 'pill' + (isSkipped ? ' on' : ''), type: 'button',
         onclick: (e) => { e.stopPropagation(); toggleSkip(it.ref, !isSkipped); },
@@ -208,7 +214,7 @@ function renderTasks() {
       onclick: (e) => e.stopPropagation(),
       onchange: (e) => { haptic(); saveTask({ ...t, enabled: e.target.checked }, true); },
     });
-    const sub = [el('span', { class: 't' }, t.time), ` · ${daysLabel(t.days)}`];
+    const sub = [el('span', { class: 't' }, t.end_time ? `${t.time}–${t.end_time}` : t.time), ` · ${daysLabel(t.days)}`];
     if (t.remind_before) sub.push(` · 🔔 ${beforeLabel(t.remind_before)}`);
     list.append(el('li', { class: 'row task tap' + (t.enabled ? '' : ' off'), onclick: () => openEditor(t) },
       el('div', { class: 'task-body' },
@@ -233,6 +239,7 @@ function openEditor(task) {
   const t = task || { title: '', time: '09:00', days: '1234567', remind_before: 0, note: '' };
   f.elements.title.value = t.title;
   f.elements.time.value = t.time;
+  setEnd(t.end_time || '');
   f.elements.note.value = t.note || '';
   f.elements.remind_before.value = String(t.remind_before);
   pickedDays = new Set(t.days.split(''));
@@ -245,6 +252,19 @@ function openEditor(task) {
   if (tg) tg.BackButton.show();
   if (!t.title) setTimeout(() => f.elements.title.focus(), 300);
 }
+
+/** Время окончания: переключатель включает поле; по умолчанию — начало + 1 час. */
+function setEnd(value) {
+  $('endOn').checked = !!value;
+  $('endTime').hidden = !value;
+  $('endTime').value = value;
+}
+$('endOn').addEventListener('change', (e) => {
+  haptic();
+  if (!e.target.checked) { setEnd(''); return; }
+  const [h, m] = ($('sheet').elements.time.value || '09:00').split(':').map(Number);
+  setEnd(`${String(Math.min(h + 1, 23)).padStart(2, '0')}:${String(h + 1 > 23 ? 59 : m).padStart(2, '0')}`);
+});
 
 function closeEditor() {
   $('sheet').hidden = true;
@@ -268,7 +288,7 @@ async function saveTask(t, quiet) {
     await api('task_save', t);
     if (!quiet) { hapticOk(); toast('✓ Сақланди'); }
   } catch (e) {
-    toast(e.message === 'title' ? 'Номини киритинг' : e.message === 'days' ? 'Камида битта кун танланг' : 'Хатолик: ' + e.message);
+    toast(e.message === 'title' ? 'Номини киритинг' : e.message === 'days' ? 'Камида битта кун танланг' : e.message === 'end_time' ? 'Тугаш вақти бошланишдан кейин бўлсин' : 'Хатолик: ' + e.message);
     throw e;
   }
 }
@@ -280,6 +300,7 @@ $('sheet').addEventListener('submit', async (e) => {
     id: editing && editing.id ? editing.id : undefined,
     title: f.elements.title.value.trim(),
     time: f.elements.time.value,
+    end_time: $('endOn').checked ? $('endTime').value : '',
     days: [...pickedDays].sort().join(''),
     remind_before: Number(f.elements.remind_before.value),
     note: f.elements.note.value.trim(),
@@ -287,6 +308,9 @@ $('sheet').addEventListener('submit', async (e) => {
   };
   if (!body.title) { toast('Номини киритинг'); return; }
   if (!body.days) { toast('Камида битта кун танланг'); return; }
+  if ($('endOn').checked && (!body.end_time || body.end_time <= body.time)) {
+    toast('Тугаш вақти бошланишдан кейин бўлсин'); return;
+  }
   try { await saveTask(body); closeEditor(); } catch (_) {}
 });
 
