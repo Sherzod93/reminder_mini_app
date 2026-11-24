@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="uz-Cyrl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>Вазифалар</title>
+  <link rel="stylesheet" href="style.css?v=5">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="nav">
+      <div class="nav-row">
+        <div>
+          <div class="eyebrow" id="topDate"></div>
+          <h1 id="pageTitle">Бугун</h1>
+        </div>
+        <div class="ring" id="ring" aria-label="Бажарилди">
+          <svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"/><circle class="ring-fg" id="ringFg" cx="18" cy="18" r="15.5"/></svg>
+          <span id="ringText">0/0</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <main>
+      <section class="tab" data-tab="today">
+        <div class="hero" id="hero" hidden>
+          <div class="hero-icon"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></div>
+          <div class="hero-body">
+            <div class="hero-label" id="heroLabel">Кейинги намоз</div>
+            <div class="hero-title" id="heroTitle"></div>
+          </div>
+          <div class="hero-time" id="heroTime"></div>
+        </div>
+        <div class="group-head">Режа</div>
+        <ul class="group" id="todayList"></ul>
+        <div class="empty" id="todayEmpty" hidden>Бугунга вазифа йўқ</div>
+      </section>
+
+      <section class="tab" data-tab="tasks" hidden>
+        <ul class="group">
+          <li class="row row-action" id="addBtn">
+            <span class="plus">+</span><span>Янги вазифа</span>
+          </li>
+        </ul>
+        <div class="group-head">Тезкор қўшиш</div>
+        <div class="chips" id="quickAdd"></div>
+        <div class="group-head" id="tasksHead">Менинг вазифаларим</div>
+        <ul class="group" id="taskList"></ul>
+        <div class="empty" id="tasksEmpty" hidden>Ҳали вазифа қўшилмаган</div>
+      </section>
+
+      <section class="tab" data-tab="settings" hidden>
+        <ul class="group">
+          <li class="row">
+            <span class="row-icon green"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
+            <span class="row-title">Намоз эслатмалари</span>
+            <input type="checkbox" class="switch" id="namazEnabled">
+          </li>
+          <li class="row">
+            <span class="row-icon orange"><svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5-6.7V4a2 2 0 1 0-4 0v.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg></span>
+            <span class="row-title">Олдиндан эслатиш</span>
+            <select class="row-select" id="namazBefore"></select>
+          </li>
+        </ul>
+        <div class="group-head">Бугунги вақтлар</div>
+        <ul class="group" id="prayerList"></ul>
+        <p class="group-foot" id="namazHint"></p>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <button data-go="today" class="active">
+        <svg viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zM5 9h14v11H5z"/></svg>
+        <span>Бугун</span>
+      </button>
+      <button data-go="tasks">
+        <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 1 0 4 8.5 1.5 1.5 0 0 0 4 5.5zm0 5A1.5 1.5 0 1 0 4 13.5 1.5 1.5 0 0 0 4 10.5zm0 5A1.5 1.5 0 1 0 4 18.5 1.5 1.5 0 0 0 4 15.5zM8 6h13v2H8zm0 5h13v2H8zm0 5h13v2H8z"/></svg>
+        <span>Вазифалар</span>
+      </button>
+      <button data-go="settings">
+        <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <span>Намоз</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="sheet-bg" id="sheetBg" hidden></div>
+  <form class="sheet" id="sheet" hidden autocomplete="off">
+    <div class="grabber"></div>
+    <div class="sheet-nav">
+      <button type="button" class="link" id="cancelBtn">Бекор</button>
+      <div class="sheet-title" id="sheetTitle">Янги вазифа</div>
+      <button type="submit" class="link strong">Сақлаш</button>
+    </div>
+
+    <ul class="group">
+      <li class="row"><input name="title" maxlength="200" required placeholder="Номи, масалан: Китоб ўқиш" class="row-input"></li>
+      <li class="row"><textarea name="note" maxlength="1000" rows="2" placeholder="Изоҳ" class="row-input"></textarea></li>
+    </ul>
+
+    <ul class="group">
+      <li class="row">
+        <span class="row-icon red"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 10.4 3.3 3.3-1.4 1.4-3.9-3.9V6h2z"/></svg></span>
+        <span class="row-title">Вақт</span>
+        <input name="time" type="time" required value="09:00" class="row-time">
+      </li>
+      <li class="row">
+        <span class="row-icon orange"><svg viewBox="0 0 24 24"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5-6.7V4a2 2 0 1 0-4 0v.3A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg></span>
+        <span class="row-title">Эслатиш</span>
+        <select name="remind_before" class="row-select"></select>
+      </li>
+    </ul>
+
+    <div class="group-head">Такрорлаш</div>
+    <div class="group days-wrap"><div class="days" id="daysPick"></div></div>
+
+    <ul class="group" id="delGroup" hidden>
+      <li class="row row-danger" id="delBtn">Вазифани ўчириш</li>
+    </ul>
+  </form>
+
+  <div class="toast" id="toast" hidden></div>
+  <div class="blocker" id="blocker" hidden>
+    <p>Бу иловани Telegram орқали очинг.</p>
+  </div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+# Вазифалар — Telegram Mini App для ежедневных напоминаний
+
+У каждого пользователя Telegram свой список задач (время, дни недели, «напомнить за N минут»,
+заметка). Намаз добавлен по умолчанию: время берётся из
+`https://namoz-vaqti.uz/kirill/namoz-vaqtlari/toshkent-shahri?format=json`, каждый намаз можно
+включить или выключить. В назначенное время бот присылает сообщение с кнопкой «✅ Бажарилди».
+
+Стек: PHP 8.2+ (`pdo_sqlite`, `curl`, `mbstring`), SQLite, без фреймворков и сборки.
+
+```
+config/config.php     открытая конфигурация (домен, часовой пояс, адрес API намаза)
+.env                  только секреты: BOT_TOKEN, WEBHOOK_SECRET (образец — .env.example)
+public/               корень сайта: index.html, app.js, style.css, api.php, webhook.php
+src/                  общий код: БД и миграция, проверка initData, Bot API, намаз
+cron/remind.php       рассылка напоминаний, запускать раз в минуту
+scripts/setup-bot.php ставит вебхук, кнопку меню и команду /start
+deploy/               конфиг nginx для sherzod.devx.uz
+data/                 база SQLite (создаётся сама, в git не идёт)
+```
+
+## Где работает сейчас
+
+- Бот: @daily_tasks_reminderbot, Mini App: https://sherzod.devx.uz/reminder/
+- Сервер 13.55.78.226 (CloudPanel), SSH `sherzod-dev@13.55.78.226`, код в
+  `~/htdocs/sherzod.devx.uz/reminder/`. Корень сайта — `toshkentkaboblari/public`, туда положена
+  ссылка `reminder → ../../reminder/public`; корень не менять.
+- Заголовки безопасности ставит `public/index.php` (vhost общий с другим проектом).
+- Cron пользователя `sherzod-dev`, лог `data/cron.log`.
+- Обновить код: архив без `data/`, `.env`, `.claude/` → `~/tmp/reminder.tgz`, распаковать в
+  `reminder/`; при правке `app.js`/`style.css` поднять `?v=` в `index.html`.
+- Подробности и ход выкатки — `.claude/plans/2026-11-24-vykatka.md`.
+
+## Выкатка на чистый сервер
+
+1. Создать бота у @BotFather, получить токен.
+2. На сервере: PHP-FPM с `pdo_sqlite`, `curl`, `mbstring`; скопировать проект в `/var/www/reminder`.
+3. `cp .env.example .env`, вписать `BOT_TOKEN` и `WEBHOOK_SECRET` (`openssl rand -hex 32`).
+4. Права: `chown -R www-data:www-data /var/www/reminder/data`, `chmod 600 .env`
+   (`.env` должен читать пользователь PHP-FPM и cron).
+5. nginx: `deploy/nginx-sherzod.devx.uz.conf` → `sites-enabled`, поправить путь к сокету
+   PHP-FPM, сертификат — `certbot --nginx -d sherzod.devx.uz`.
+6. Cron от пользователя `www-data`:
+   ```
+   * * * * * php /var/www/reminder/cron/remind.php >> /var/log/reminder-cron.log 2>&1
+   ```
+7. `sudo -u www-data php scripts/setup-bot.php` — вебхук, кнопка меню «Вазифалар», `/start`.
+8. В @BotFather → Bot Settings → Configure Mini App (по желанию) указать `https://sherzod.devx.uz`.
+
+Пользователь нажимает `/start` (без этого бот не может ему писать) и открывает Mini App
+кнопкой меню.
+
+## Локальная проверка
+
+```
+php -d extension=pdo_sqlite -S 127.0.0.1:8099 -t public
+```
+
+с переменными окружения `BOT_TOKEN`, `WEBHOOK_SECRET`. Вне Telegram страница показывает
+«откройте через Telegram»; для проверки в браузере нужен подписанный `initData` в адресе:
+`http://127.0.0.1:8099/#tgWebAppData=<urlencoded initData>&tgWebAppVersion=8.0`.
+
+## Как устроено
+
+- **Вход** — подпись `initData` Telegram проверяется на сервере (HMAC от токена бота), срок 24 ч.
+  Пользователь видит и меняет только свои задачи.
+- **Напоминания** — cron раз в минуту; если минута пропущена, напоминание ещё уходит в течение
+  10 минут. Таблица `sent` не даёт прислать одно и то же дважды за день; отмеченное
+  «бажарилди» не присылается.
+- **Намаз** — время кэшируется в БД на день; при сбое источника повтор не чаще раза в 5 минут,
+  по вчерашнему времени напоминания не шлются.
+- Время везде — Ташкент (`Asia/Tashkent`).
