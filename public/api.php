@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/telegram.php';
 require __DIR__ . '/../src/namaz.php';
+require __DIR__ . '/../src/history.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -46,6 +47,7 @@ if ($method === 'POST') {
 try {
     match ([$method, $action]) {
         ['GET', 'state']        => null,
+        ['GET', 'stats']        => out(user_stats($uid, in_array((int) ($_GET['days'] ?? 7), [7, 30], true) ? (int) $_GET['days'] : 7)),
         ['POST', 'task_save']   => task_save($uid, $in),
         ['POST', 'task_delete'] => task_delete($uid, $in),
         ['POST', 'done']        => set_mark($uid, $in, 'done'),

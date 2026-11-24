@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
   <title>Вазифалар</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=12">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -52,6 +52,27 @@
         <div class="empty" id="tasksEmpty" hidden>Ҳали вазифа қўшилмаган</div>
       </section>
 
+      <section class="tab" data-tab="stats" hidden>
+        <div class="seg" id="statsSeg">
+          <button type="button" data-days="7" class="on">7 кун</button>
+          <button type="button" data-days="30">30 кун</button>
+        </div>
+        <div class="cards" id="statCards"></div>
+
+        <div class="group-head">Кунлар бўйича, %</div>
+        <div class="group chart-wrap">
+          <div class="bars" id="bars" role="img" aria-label="Кунлар бўйича бажарилиш фоизи"></div>
+        </div>
+
+        <div class="group-head" id="dayHead">Бугун</div>
+        <ul class="group" id="dayList"></ul>
+        <div class="empty" id="dayEmpty" hidden>Бу кунда режа йўқ</div>
+
+        <div class="group-head">Жадвал</div>
+        <div class="group table-wrap" id="gridWrap"><table class="grid" id="grid"></table></div>
+        <p class="group-foot">✅ бажарилди · ❌ бажарилмади · ⏭ ўтказилди · ⏳ кутилмоқда</p>
+      </section>
+
       <section class="tab" data-tab="settings" hidden>
         <ul class="group">
           <li class="row">
@@ -79,6 +100,10 @@
       <button data-go="tasks">
         <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 1 0 4 8.5 1.5 1.5 0 0 0 4 5.5zm0 5A1.5 1.5 0 1 0 4 13.5 1.5 1.5 0 0 0 4 10.5zm0 5A1.5 1.5 0 1 0 4 18.5 1.5 1.5 0 0 0 4 15.5zM8 6h13v2H8zm0 5h13v2H8zm0 5h13v2H8z"/></svg>
         <span>Вазифалар</span>
+      </button>
+      <button data-go="stats">
+        <svg viewBox="0 0 24 24"><path d="M4 20h16v2H2V2h2zm3-3V11h3v6zm5 0V6h3v11zm5 0v-8h3v8z"/></svg>
+        <span>Статистика</span>
       </button>
       <button data-go="settings">
         <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -133,6 +158,6 @@
     <p>Бу иловани Telegram орқали очинг.</p>
   </div>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

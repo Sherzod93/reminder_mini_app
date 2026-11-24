@@ -10,6 +10,7 @@ if (PHP_SAPI !== 'cli') {
 require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/telegram.php';
 require __DIR__ . '/../src/namaz.php';
+require __DIR__ . '/../src/history.php';
 
 $lock = fopen(dirname((string) cfg('db_path')) . '/cron.lock', 'c');
 if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
@@ -139,6 +140,11 @@ if ($namaz) {
             'label' => $next ? h($namaz['labels'][$next] ?? $next) : 'ярим тун',
         ];
     }
+}
+
+// После полуночи — сохранить итог вчерашнего дня всем, включая тех, кому бот писать не может.
+foreach ($q('SELECT id FROM users')->fetchAll() as $row) {
+    close_days((int) $row['id']);
 }
 
 $users = $q('SELECT id, namaz_enabled, namaz_before FROM users WHERE can_message = 1')->fetchAll();

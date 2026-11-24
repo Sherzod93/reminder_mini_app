@@ -102,6 +102,23 @@ function db_migrate(PDO $pdo): void
             date    TEXT    NOT NULL,
             PRIMARY KEY (user_id, ref, date)
         );
+        -- Итог прошедшего дня: что было в плане и результат (done | skipped | missed).
+        CREATE TABLE IF NOT EXISTS history (
+            user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            date     TEXT    NOT NULL,
+            ref      TEXT    NOT NULL,
+            kind     TEXT    NOT NULL,          -- task | namaz
+            title    TEXT    NOT NULL,
+            time     TEXT    NOT NULL,
+            end_time TEXT    NOT NULL DEFAULT '',
+            status   TEXT    NOT NULL,
+            PRIMARY KEY (user_id, date, ref)
+        );
+        CREATE TABLE IF NOT EXISTS days_closed (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            date    TEXT    NOT NULL,
+            PRIMARY KEY (user_id, date)
+        );
         -- «Сегодня нет времени»: повторы напоминаний на этот день прекращаются.
         CREATE TABLE IF NOT EXISTS skipped (
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

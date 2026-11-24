@@ -7,7 +7,7 @@ const DAYS_SHORT = ['Ду', 'Се', 'Чо', 'Па', 'Жу', 'Ша', 'Як'];
 const DAYS_FULL = ['Душанба', 'Сешанба', 'Чоршанба', 'Пайшанба', 'Жума', 'Шанба', 'Якшанба'];
 const MONTHS = ['январ', 'феврал', 'март', 'апрел', 'май', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
 const BEFORE = [0, 5, 10, 15, 30, 60];
-const TITLES = { today: 'Бугун', tasks: 'Вазифалар', settings: 'Намоз' };
+const TITLES = { today: 'Бугун', tasks: 'Вазифалар', stats: 'Статистика', settings: 'Намоз' };
 const QUICK = [
   ['📚 Дарс қилиш', '16:00'],
   ['📖 Китоб ўқиш', '21:00'],
@@ -357,6 +357,130 @@ function renderSettings() {
 $('namazEnabled').addEventListener('change', (e) => { haptic(); api('settings', { namaz_enabled: e.target.checked }).catch((er) => toast(er.message)); });
 $('namazBefore').addEventListener('change', (e) => api('settings', { namaz_before: Number(e.target.value) }).catch((er) => toast(er.message)));
 
+/* ---------- stats ---------- */
+
+const STATUS_ICON = { done: '✅', missed: '❌', skipped: '⏭', pending: '⏳' };
+const STATUS_TEXT = { done: 'Бажарилди', missed: 'Бажарилмади', skipped: 'Ўтказилди', pending: 'Кутилмоқда' };
+let statsDays = 7;
+let ST = null;          // ответ stats
+let statsSel = null;    // выбранная дата
+
+async function loadStats() {
+  try {
+    const res = await fetch(`api.php?action=stats&days=${statsDays}`, {
+      headers: { 'X-Telegram-Init-Data': tg ? tg.initData : '' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    ST = await res.json();
+    if (!statsSel || !ST.days.some((d) => d.date === statsSel)) statsSel = ST.today;
+    renderStats();
+  } catch (e) { toast('Хатолик: ' + e.message); }
+}
+
+/**
+ * Доля выполненного. В итогах периода ожидающие сегодня не считаются; для самого сегодняшнего
+ * дня ($whole) — считаются, иначе «1 из 7» показывалось бы как 100%.
+ */
+function rate(items, whole = false) {
+  const closed = whole ? items : items.filter((i) => i.status !== 'pending');
+  const done = closed.filter((i) => i.status === 'done').length;
+  return { done, total: closed.length, pct: closed.length ? Math.round((done / closed.length) * 100) : null };
+}
+
+function dayLabel(d, long) {
+  const [, m, day] = d.date.split('-').map(Number);
+  if (d.date === ST.today && long) return 'Бугун';
+  return long ? `${DAYS_FULL[d.weekday - 1]}, ${day} ${MONTHS[m - 1]}` : DAYS_SHORT[d.weekday - 1];
+}
+
+function renderStats() {
+  const tracked = ST.days.filter((d) => d.tracked);
+  const all = tracked.flatMap((d) => d.items);
+  const total = rate(all);
+  const nam = rate(all.filter((i) => i.kind === 'namaz'));
+  const tasks = rate(all.filter((i) => i.kind === 'task'));
+
+  // Кетма-кет: подряд идущие полностью выполненные дни, считая назад от сегодня
+  // (сегодня засчитывается, только если уже всё сделано; дни без плана пропускаются).
+  let streak = 0;
+  for (const d of [...tracked].reverse()) {
+    if (!d.items.length) continue;
+    const allDone = d.items.every((i) => i.status === 'done');
+    if (d.date === ST.today && !allDone) continue;
+    if (!allDone) break;
+    streak++;
+  }
+
+  const card = (label, value, sub) => el('div', { class: 'card' },
+    el('div', { class: 'card-label' }, label),
+    el('div', { class: 'card-value' }, value),
+    el('div', { class: 'card-sub' }, sub));
+  $('statCards').replaceChildren(
+    card('Бажарилди', total.pct === null ? '—' : `${total.pct}%`, `${total.done} / ${total.total}`),
+    card('Вазифалар', tasks.pct === null ? '—' : `${tasks.pct}%`, `${tasks.done} / ${tasks.total}`),
+    card('Намоз', nam.pct === null ? '—' : `${nam.pct}%`, `${nam.done} / ${nam.total}`),
+    card('Кетма-кет', `${streak}`, 'тўлиқ кун'),
+  );
+
+  // Столбики: один ряд — один цвет; выбранный день выделен, пустые дни — серая черта.
+  const many = ST.days.length > 10;
+  $('bars').replaceChildren(...ST.days.map((d, i) => {
+    const r = rate(d.items, d.date === ST.today);
+    const h = r.pct === null ? 0 : Math.max(r.pct, 2);
+    const tip = `${dayLabel(d, true)}: ` + (r.pct === null ? 'маълумот йўқ' : `${r.pct}% (${r.done}/${r.total})`);
+    const showLabel = !many || i % 5 === 0 || d.date === ST.today;
+    return el('button', {
+      type: 'button', class: 'bar' + (d.date === statsSel ? ' sel' : '') + (r.pct === null ? ' nodata' : ''),
+      title: tip, 'aria-label': tip,
+      onclick: () => { statsSel = d.date; haptic(); renderStats(); },
+    },
+      el('span', { class: 'bar-val' }, r.pct === null || many ? '' : `${r.pct}`),
+      el('span', { class: 'bar-track' }, el('span', { class: 'bar-fill', style: `height:${h}%` })),
+      el('span', { class: 'bar-lab' }, showLabel ? (many ? String(Number(d.date.slice(8))) : dayLabel(d, false)) : ''));
+  }));
+
+  // Выбранный день
+  const sel = ST.days.find((d) => d.date === statsSel);
+  const r = rate(sel.items, sel.date === ST.today);
+  $('dayHead').textContent = dayLabel(sel, true) + (r.pct === null ? '' : ` · ${r.pct}%`);
+  $('dayList').replaceChildren(...sel.items.map((it) => el('li', { class: 'row' },
+    el('span', { class: 'st-icon', title: STATUS_TEXT[it.status] }, STATUS_ICON[it.status]),
+    el('span', { class: 'row-title' }, (it.kind === 'namaz' ? `${it.title} намози` : it.title)),
+    el('span', { class: 'row-value' }, it.end_time ? `${it.time}–${it.end_time}` : it.time))));
+  $('dayEmpty').hidden = sel.items.length > 0;
+
+  // Таблица: строки — пункты, столбцы — дни. Намаз сверху в порядке дня, затем задачи по времени.
+  const rows = new Map();
+  for (const d of ST.days) {
+    for (const it of d.items) rows.set(it.ref, { title: it.kind === 'namaz' ? `🕌 ${it.title}` : it.title, kind: it.kind, time: it.time });
+  }
+  const order = [...rows.entries()].sort(([, a], [, b]) =>
+    (a.kind === b.kind ? a.time.localeCompare(b.time) : a.kind === 'namaz' ? -1 : 1));
+  const head = el('tr', {}, el('th', { class: 'sticky' }, ''),
+    ...ST.days.map((d) => el('th', {
+      class: (d.date === statsSel ? 'sel' : '') + (d.date === ST.today ? ' today' : ''),
+      onclick: () => { statsSel = d.date; renderStats(); },
+    }, el('div', {}, DAYS_SHORT[d.weekday - 1]), el('div', { class: 'num' }, String(Number(d.date.slice(8)))))));
+  const body = order.map(([ref, row]) => el('tr', {},
+    el('th', { class: 'sticky', title: row.title }, row.title),
+    ...ST.days.map((d) => {
+      const it = d.items.find((x) => x.ref === ref);
+      return el('td', { class: (it ? it.status : 'none') + (d.date === statsSel ? ' sel' : ''), title: it ? STATUS_TEXT[it.status] : '' },
+        it ? STATUS_ICON[it.status] : '');
+    })));
+  $('grid').replaceChildren(el('thead', {}, head), el('tbody', {}, ...body));
+  if (!order.length) $('grid').replaceChildren(el('tbody', {}, el('tr', {}, el('td', { class: 'none' }, 'Ҳали маълумот йўқ'))));
+  const wrap = $('gridWrap');
+  wrap.scrollLeft = wrap.scrollWidth; // последние дни видны сразу
+}
+
+document.querySelectorAll('#statsSeg button').forEach((b) => b.addEventListener('click', () => {
+  statsDays = Number(b.dataset.days);
+  document.querySelectorAll('#statsSeg button').forEach((x) => x.classList.toggle('on', x === b));
+  try { tg.HapticFeedback.selectionChanged(); } catch (_) {}
+  loadStats();
+}));
+
 /* ---------- shell ---------- */
 
 function render() {
@@ -381,6 +505,7 @@ function switchTab(name) {
   $('pageTitle').textContent = TITLES[name];
   try { tg.HapticFeedback.selectionChanged(); } catch (_) {}
   window.scrollTo(0, 0);
+  if (name === 'stats') loadStats();
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.go)));
 

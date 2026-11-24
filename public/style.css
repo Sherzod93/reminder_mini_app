@@ -180,6 +180,53 @@ main { padding: 0 0 16px; }
 .task.skipped .task-title { color: var(--label2); }
 .task.skipped .task-sub .t { color: var(--label2) !important; }
 
+/* ---------- stats ---------- */
+.seg {
+  display: flex; margin: 12px 16px 0; padding: 2px; border-radius: 9px; background: var(--fill);
+}
+.seg button {
+  flex: 1; border: 0; background: transparent; color: var(--label); cursor: pointer;
+  font: 500 13px var(--font); padding: 6px 0; border-radius: 7px;
+}
+.seg button.on { background: var(--card); font-weight: 600; box-shadow: 0 3px 8px rgba(0,0,0,.12), 0 3px 1px rgba(0,0,0,.04); }
+:root[data-theme="dark"] .seg button.on { background: #636366; }
+
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 16px 0; }
+.card-label { font-size: 13px; color: var(--label2); }
+.card-value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .3px; margin-top: 2px; }
+.card-sub { font-size: 13px; color: var(--label2); font-variant-numeric: tabular-nums; }
+.cards .card { margin: 0; padding: 12px 14px; background: var(--card); border-radius: var(--radius); }
+
+.chart-wrap { padding: 12px 10px 8px; }
+.bars { display: flex; align-items: stretch; gap: 2px; height: 160px; }
+.bar {
+  flex: 1 1 0; width: 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit;
+}
+.bar-val { height: 14px; font-size: 11px; color: var(--label2); font-variant-numeric: tabular-nums; }
+.bar-track { flex: 1; width: 100%; max-width: 28px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--sep); }
+.bar-fill { width: 100%; background: var(--blue); border-radius: 4px 4px 0 0; opacity: .55; transition: height .3s; }
+.bar.sel .bar-fill { opacity: 1; }
+.bar.nodata .bar-fill { height: 2px !important; background: var(--label3); }
+.bar-lab { height: 14px; font-size: 11px; color: var(--label2); }
+.bar.sel .bar-lab { color: var(--blue); font-weight: 600; }
+
+.st-icon { width: 24px; text-align: center; flex: none; }
+
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.grid { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 100%; }
+.grid th, .grid td { padding: 7px 4px; text-align: center; border-bottom: .5px solid var(--sep); white-space: nowrap; }
+.grid tr:last-child th, .grid tr:last-child td { border-bottom: 0; }
+.grid thead th { font-weight: 600; color: var(--label2); font-size: 11px; cursor: pointer; min-width: 30px; }
+.grid thead th .num { font-size: 13px; color: var(--label); }
+.grid thead th.today .num { color: var(--blue); }
+.grid th.sel, .grid td.sel { background: color-mix(in srgb, var(--blue) 10%, transparent); }
+.grid .sticky {
+  position: sticky; left: 0; z-index: 1; background: var(--card); text-align: left;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; font-weight: 500; color: var(--label);
+}
+.grid td.none { color: var(--label3); }
+
 .empty { text-align: center; color: var(--label2); padding: 40px 16px; font-size: 15px; }
 
 /* ---------- chips ---------- */
