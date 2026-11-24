@@ -164,6 +164,17 @@ main { padding: 0 0 16px; }
   background: color-mix(in srgb, var(--green) 14%, transparent); border-radius: 6px; padding: 2px 7px;
 }
 
+.pill {
+  flex: none; align-self: center; border: 0; cursor: pointer;
+  font: 600 13px var(--font); letter-spacing: -.08px;
+  color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent);
+  border-radius: 14px; padding: 5px 11px;
+}
+.pill:active { opacity: .6; }
+.pill.on { color: var(--label2); background: var(--fill); }
+.task.skipped .task-title { color: var(--label2); }
+.task.skipped .task-sub .t { color: var(--label2) !important; }
+
 .empty { text-align: center; color: var(--label2); padding: 40px 16px; font-size: 15px; }
 
 /* ---------- chips ---------- */

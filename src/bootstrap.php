@@ -102,12 +102,30 @@ function db_migrate(PDO $pdo): void
             date    TEXT    NOT NULL,
             PRIMARY KEY (user_id, ref, date)
         );
+        -- «Сегодня нет времени»: повторы напоминаний на этот день прекращаются.
+        CREATE TABLE IF NOT EXISTS skipped (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            ref     TEXT    NOT NULL,
+            date    TEXT    NOT NULL,
+            PRIMARY KEY (user_id, ref, date)
+        );
         CREATE TABLE IF NOT EXISTS namaz_cache (
             date       TEXT PRIMARY KEY,
             data       TEXT NOT NULL,
             fetched_at TEXT NOT NULL
         );
     SQL);
+
+    // Повторные напоминания: когда слали последний раз, id сообщения, сколько повторов.
+    $cols = array_column($pdo->query('PRAGMA table_info(sent)')->fetchAll(), 'name');
+    if (!in_array('last_at', $cols, true)) {
+        $pdo->exec(<<<SQL
+            ALTER TABLE sent ADD COLUMN last_at INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sent ADD COLUMN msg_id  INTEGER;
+            ALTER TABLE sent ADD COLUMN repeats INTEGER NOT NULL DEFAULT 0;
+            UPDATE sent SET last_at = CAST(strftime('%s', 'now') AS INTEGER);
+        SQL);
+    }
 }
 
 function user_upsert(array $u, ?bool $canMessage = null): void

@@ -33,13 +33,14 @@ if (isset($update['message']['from'], $update['message']['chat']) && $update['me
     exit;
 }
 
-// Кнопка «Бажарилди» под напоминанием: d|<ref>|<date>
+// Кнопки под напоминанием: d|<ref>|<date> — «Бажарилди», s|<ref>|<date> — «Бугун вақтим йўқ»
+// (повторы на этот день прекращаются).
 if (isset($update['callback_query'])) {
     $cq = $update['callback_query'];
     $uid = (int) $cq['from']['id'];
     $parts = explode('|', (string) ($cq['data'] ?? ''));
     $text = '';
-    if (count($parts) === 3 && $parts[0] === 'd'
+    if (count($parts) === 3 && in_array($parts[0], ['d', 's'], true)
         && preg_match('/^(t:\d+|n:[a-z]+)$/', $parts[1])
         && preg_match('/^\d{4}-\d{2}-\d{2}$/', $parts[2])) {
         $ok = true;
@@ -49,13 +50,14 @@ if (isset($update['callback_query'])) {
             $ok = (bool) $st->fetch();
         }
         if ($ok) {
-            db()->prepare('INSERT OR IGNORE INTO done (user_id, ref, date) VALUES (?, ?, ?)')->execute([$uid, $parts[1], $parts[2]]);
-            $text = '✅ Бажарилди';
+            $table = $parts[0] === 'd' ? 'done' : 'skipped';
+            db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $parts[1], $parts[2]]);
+            $text = $parts[0] === 'd' ? '✅ Бажарилди' : '⏭ Бугун бошқа эслатилмайди';
             if (isset($cq['message']['message_id'])) {
                 tg_api('editMessageReplyMarkup', [
                     'chat_id'      => $cq['message']['chat']['id'],
                     'message_id'   => $cq['message']['message_id'],
-                    'reply_markup' => ['inline_keyboard' => [[['text' => '✅ Бажарилди', 'callback_data' => 'noop']]]],
+                    'reply_markup' => ['inline_keyboard' => [[['text' => $text, 'callback_data' => 'noop']]]],
                 ]);
             }
         } else {

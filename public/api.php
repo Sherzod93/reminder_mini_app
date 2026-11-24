@@ -48,7 +48,8 @@ try {
         ['GET', 'state']        => null,
         ['POST', 'task_save']   => task_save($uid, $in),
         ['POST', 'task_delete'] => task_delete($uid, $in),
-        ['POST', 'done']        => set_done($uid, $in),
+        ['POST', 'done']        => set_mark($uid, $in, 'done'),
+        ['POST', 'skip']        => set_mark($uid, $in, 'skipped'),
         ['POST', 'settings']    => save_settings($uid, $in),
         default                 => fail('not found', 404),
     };
@@ -77,6 +78,8 @@ function state(int $uid): array
 
     $d = db()->prepare('SELECT ref FROM done WHERE user_id = ? AND date = ?');
     $d->execute([$uid, today()]);
+    $sk = db()->prepare('SELECT ref FROM skipped WHERE user_id = ? AND date = ?');
+    $sk->execute([$uid, today()]);
 
     $namaz = namaz_today();
     return [
@@ -97,6 +100,7 @@ function state(int $uid): array
         'prayers'  => namaz_user_settings($uid),
         'tasks'    => $tasks,
         'done'     => array_column($d->fetchAll(), 'ref'),
+        'skipped'  => array_column($sk->fetchAll(), 'ref'),
     ];
 }
 
@@ -137,6 +141,7 @@ function task_save(int $uid, array $in): void
         }
         // Время поменяли — разрешаем напомнить сегодня ещё раз.
         db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref = ? AND date = ?')->execute([$uid, "t:$id", today()]);
+        db()->prepare('DELETE FROM skipped WHERE user_id = ? AND ref = ? AND date = ?')->execute([$uid, "t:$id", today()]);
         return;
     }
 
@@ -155,10 +160,16 @@ function task_delete(int $uid, array $in): void
     db()->prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?')->execute([$id, $uid]);
     db()->prepare('DELETE FROM done WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
     db()->prepare('DELETE FROM sent WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
+    db()->prepare('DELETE FROM skipped WHERE user_id = ? AND ref = ?')->execute([$uid, "t:$id"]);
 }
 
-function set_done(int $uid, array $in): void
+/** Отметка на сегодня: $table = done («бажарилди») или skipped («вақтим йўқ»). */
+function set_mark(int $uid, array $in, string $table): void
 {
+    if (!in_array($table, ['done', 'skipped'], true)) {
+        throw new InvalidArgumentException('table');
+    }
+    $flag = $table === 'done' ? 'done' : 'skip';
     $ref = (string) ($in['ref'] ?? '');
     if (preg_match('/^t:(\d+)$/', $ref, $m)) {
         $st = db()->prepare('SELECT 1 FROM tasks WHERE id = ? AND user_id = ?');
@@ -169,10 +180,11 @@ function set_done(int $uid, array $in): void
     } elseif (!preg_match('/^n:(' . implode('|', NAMAZ_KEYS) . ')$/', $ref)) {
         throw new InvalidArgumentException('ref');
     }
-    if (!empty($in['done'])) {
-        db()->prepare('INSERT OR IGNORE INTO done (user_id, ref, date) VALUES (?, ?, ?)')->execute([$uid, $ref, today()]);
+    // $table — из белого списка выше, в запрос подставляется безопасно.
+    if (!empty($in[$flag])) {
+        db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $ref, today()]);
     } else {
-        db()->prepare('DELETE FROM done WHERE user_id = ? AND ref = ? AND date = ?')->execute([$uid, $ref, today()]);
+        db()->prepare("DELETE FROM $table WHERE user_id = ? AND ref = ? AND date = ?")->execute([$uid, $ref, today()]);
     }
 }
 

@@ -100,10 +100,11 @@ async function api(action, body) {
 function todayItems() {
   const items = [];
   if (S.namaz && S.user.namaz_enabled) {
-    for (const [key, time] of Object.entries(S.namaz.times)) {
+    const times = Object.values(S.namaz.times);
+    for (const [i, [key, time]] of Object.entries(S.namaz.times).entries()) {
       if (!S.prayers[key]) continue;
       items.push({
-        ref: `n:${key}`, time, namaz: true,
+        ref: `n:${key}`, time, namaz: true, until: times[i + 1] || null,
         title: `${S.namaz.labels[key]} намози`,
       });
     }
@@ -124,15 +125,28 @@ function renderToday() {
   const list = $('todayList');
   list.replaceChildren();
 
+  const skipped = new Set(S.skipped || []);
   for (const it of items) {
     const isDone = done.has(it.ref);
+    const isSkipped = !isDone && skipped.has(it.ref);
     const late = it.time < now;
-    let cls = 'row task' + (it.namaz ? ' namaz' : '') + (isDone ? ' done' : '') + (late ? ' late' : '');
+    let cls = 'row task' + (it.namaz ? ' namaz' : '') + (isDone ? ' done' : '') + (late ? ' late' : '') + (isSkipped ? ' skipped' : '');
     if (!isDone && !late && !nextMarked) { cls += ' next'; nextMarked = true; }
 
     const sub = [el('span', { class: 't' }, it.time)];
+    if (isSkipped) sub.push(' · ⏭ Бугун ўтказилди');
     if (it.task && it.task.remind_before) sub.push(` · 🔔 ${beforeLabel(it.task.remind_before)}`);
     if (it.note) sub.push(` · ${it.note}`);
+
+    // Просроченное и не сделанное: «Ўтказиш» — сегодня больше не напоминать.
+    // Намаз повторяется только до начала следующего — после этого кнопка не нужна.
+    const stillReminded = !it.namaz || !it.until || it.until > now;
+    const pill = !isDone && late && stillReminded
+      ? el('button', {
+        class: 'pill' + (isSkipped ? ' on' : ''), type: 'button',
+        onclick: (e) => { e.stopPropagation(); toggleSkip(it.ref, !isSkipped); },
+      }, isSkipped ? 'Қайтариш' : 'Ўтказиш')
+      : (it.namaz ? el('span', { class: 'badge' }, 'Намоз') : null);
 
     list.append(el('li', { class: cls + (it.task ? ' tap' : '') },
       el('button', {
@@ -143,7 +157,7 @@ function renderToday() {
         el('div', { class: 'task-title' }, it.title),
         el('div', { class: 'task-sub' }, sub),
       ),
-      it.namaz ? el('span', { class: 'badge' }, 'Намоз') : null,
+      pill,
     ));
   }
   $('todayEmpty').hidden = items.length > 0;
@@ -171,6 +185,16 @@ async function toggleDone(ref, value) {
   S.done = value ? [...S.done, ref] : S.done.filter((r) => r !== ref);
   render();
   try { await api('done', { ref, done: value }); } catch (e) { toast('Хатолик: ' + e.message); load(); }
+}
+
+async function toggleSkip(ref, value) {
+  haptic();
+  S.skipped = value ? [...(S.skipped || []), ref] : (S.skipped || []).filter((r) => r !== ref);
+  render();
+  try {
+    await api('skip', { ref, skip: value });
+    toast(value ? '⏭ Бугун бошқа эслатилмайди' : '🔁 Эслатма қайтарилди');
+  } catch (e) { toast('Хатолик: ' + e.message); load(); }
 }
 
 /* ---------- tasks ---------- */

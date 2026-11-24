@@ -20,32 +20,66 @@ $now = time();
 $today = today();
 $weekday = date('N', $now);
 $window = (int) cfg('send_window_min') * 60;
+$repeatEvery = max(1, (int) cfg('repeat_every_min')) * 60;
+$endOfDay = strtotime("$today 23:59:59");
 $appUrl = rtrim((string) cfg('app_url'), '/') . '/';
-$sent = 0;
+$stat = ['first' => 0, 'repeat' => 0];
 
-/** Пора ли слать: момент напоминания наступил, но не раньше, чем $window назад. */
-$due = static function (string $hhmm, int $beforeMin) use ($today, $now, $window): bool {
+$q = static function (string $sql, array $args = []): PDOStatement {
+    $st = db()->prepare($sql);
+    $st->execute($args);
+    return $st;
+};
+
+$buttons = static fn (string $ref, bool $namaz) => [
+    [
+        ['text' => '✅ Бажарилди', 'callback_data' => "d|$ref|$today"],
+        ['text' => $namaz ? '🔕 Бугун эслатмасин' : '⏭ Бугун вақтим йўқ', 'callback_data' => "s|$ref|$today"],
+    ],
+    [['text' => '📋 Очиш', 'web_app' => ['url' => $appUrl]]],
+];
+
+/**
+ * Одно напоминание: первое — когда наступил момент (не позже $window), повторы — каждые
+ * $repeatEvery, пока не отмечено «бажарилди» или «вақтим йўқ» и не наступил $until.
+ */
+$process = static function (int $uid, string $ref, string $hhmm, int $beforeMin, int $until, bool $isNamaz, callable $text)
+    use ($q, $now, $today, $window, $repeatEvery, $buttons, &$stat): void {
     $at = strtotime("$today $hhmm") - $beforeMin * 60;
-    return $at <= $now && $now - $at < $window;
-};
+    if ($at > $now) {
+        return;
+    }
+    if ($q('SELECT 1 FROM done WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch()
+        || $q('SELECT 1 FROM skipped WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch()) {
+        return;
+    }
+    $row = $q('SELECT last_at, msg_id, repeats FROM sent WHERE user_id = ? AND ref = ? AND date = ?', [$uid, $ref, $today])->fetch();
 
-/** Отметить как отправленное; true — если ещё не было (защита от дублей). */
-$claim = static function (int $uid, string $ref) use ($today): bool {
-    $st = db()->prepare('INSERT OR IGNORE INTO sent (user_id, ref, date) VALUES (?, ?, ?)');
-    $st->execute([$uid, $ref, $today]);
-    return $st->rowCount() === 1;
+    if (!$row) {
+        if ($now - $at >= $window) {
+            return; // момент давно прошёл (задачу завели позже) — не дёргаем
+        }
+        $ins = $q('INSERT OR IGNORE INTO sent (user_id, ref, date, last_at) VALUES (?, ?, ?, ?)', [$uid, $ref, $today, $now]);
+        if ($ins->rowCount() !== 1) {
+            return;
+        }
+        $res = tg_send($uid, $text(false), $buttons($ref, $isNamaz));
+        $stat['first']++;
+    } else {
+        if ($now >= $until || $now - (int) $row['last_at'] < $repeatEvery) {
+            return;
+        }
+        $q('UPDATE sent SET last_at = ?, repeats = repeats + 1 WHERE user_id = ? AND ref = ? AND date = ?', [$now, $uid, $ref, $today]);
+        if ($row['msg_id']) {
+            tg_api('deleteMessage', ['chat_id' => $uid, 'message_id' => (int) $row['msg_id']]); // чат не засоряем
+        }
+        $res = tg_send($uid, $text(true), $buttons($ref, $isNamaz));
+        $stat['repeat']++;
+    }
+    if (!empty($res['ok'])) {
+        $q('UPDATE sent SET msg_id = ? WHERE user_id = ? AND ref = ? AND date = ?', [(int) $res['result']['message_id'], $uid, $ref, $today]);
+    }
 };
-
-$isDone = static function (int $uid, string $ref) use ($today): bool {
-    $st = db()->prepare('SELECT 1 FROM done WHERE user_id = ? AND ref = ? AND date = ?');
-    $st->execute([$uid, $ref, $today]);
-    return (bool) $st->fetch();
-};
-
-$buttons = static fn (string $ref) => [[
-    ['text' => '✅ Бажарилди', 'callback_data' => "d|$ref|$today"],
-    ['text' => '📋 Очиш', 'web_app' => ['url' => $appUrl]],
-]];
 
 $beforeText = static fn (int $min): string => $min > 0 ? " ({$min} дақиқадан сўнг)" : '';
 
@@ -53,27 +87,34 @@ $namaz = namaz_today();
 if ($namaz && $namaz['stale']) {
     $namaz = null; // не шлём намаз по вчерашнему времени
 }
+// Повторы намаза — до начала следующего намаза.
+$namazUntil = [];
+if ($namaz) {
+    $keys = array_keys($namaz['times']);
+    foreach ($keys as $i => $k) {
+        $next = $keys[$i + 1] ?? null;
+        $namazUntil[$k] = $next ? strtotime("$today {$namaz['times'][$next]}") : $endOfDay;
+    }
+}
 
-$users = db()->query('SELECT id, namaz_enabled, namaz_before FROM users WHERE can_message = 1')->fetchAll();
-$taskSt = db()->prepare('SELECT id, title, note, time, days, remind_before FROM tasks WHERE user_id = ? AND enabled = 1');
+$users = $q('SELECT id, namaz_enabled, namaz_before FROM users WHERE can_message = 1')->fetchAll();
 
 foreach ($users as $u) {
     $uid = (int) $u['id'];
 
     // Свои задачи
-    $taskSt->execute([$uid]);
-    foreach ($taskSt->fetchAll() as $t) {
-        $ref = 't:' . $t['id'];
-        $before = (int) $t['remind_before'];
-        if (!str_contains($t['days'], $weekday) || !$due($t['time'], $before) || $isDone($uid, $ref) || !$claim($uid, $ref)) {
+    $tasks = $q('SELECT id, title, note, time, days, remind_before FROM tasks WHERE user_id = ? AND enabled = 1', [$uid])->fetchAll();
+    foreach ($tasks as $t) {
+        if (!str_contains($t['days'], $weekday)) {
             continue;
         }
-        $text = "⏰ <b>" . h($t['title']) . "</b>\n🕒 " . $t['time'] . $beforeText($before);
-        if ($t['note'] !== '') {
-            $text .= "\n\n" . h($t['note']);
-        }
-        tg_send($uid, $text, $buttons($ref));
-        $sent++;
+        $before = (int) $t['remind_before'];
+        $process($uid, 't:' . $t['id'], $t['time'], $before, $endOfDay, false, static function (bool $repeat) use ($t, $before, $beforeText): string {
+            $text = $repeat
+                ? "🔁 Ҳали бажарилмаган: <b>" . h($t['title']) . "</b>\n🕒 Вақти: " . $t['time']
+                : "⏰ <b>" . h($t['title']) . "</b>\n🕒 " . $t['time'] . $beforeText($before);
+            return $t['note'] !== '' ? $text . "\n\n" . h($t['note']) : $text;
+        });
     }
 
     // Намаз
@@ -82,25 +123,25 @@ foreach ($users as $u) {
     }
     $before = (int) $u['namaz_before'];
     foreach (namaz_user_settings($uid) as $key => $on) {
-        $ref = "n:$key";
         $time = $namaz['times'][$key] ?? null;
-        if (!$on || !$time || !$due($time, $before) || $isDone($uid, $ref) || !$claim($uid, $ref)) {
+        if (!$on || !$time) {
             continue;
         }
         $label = h($namaz['labels'][$key] ?? $key);
-        $text = "🕌 <b>{$label}</b> намози вақти — {$time}" . $beforeText($before);
-        tg_send($uid, $text, $buttons($ref));
-        $sent++;
+        $process($uid, "n:$key", $time, $before, $namazUntil[$key], true, static fn (bool $repeat): string => $repeat
+            ? "🔁 <b>{$label}</b> намози ҳали ўқилмаган\n🕒 Вақти: {$time}"
+            : "🕌 <b>{$label}</b> намози вақти — {$time}" . $beforeText($before));
     }
 }
 
-if ($sent > 0) {
-    echo date('c') . " sent=$sent\n";
+if ($stat['first'] + $stat['repeat'] > 0) {
+    echo date('c') . " sent={$stat['first']} repeat={$stat['repeat']}\n";
 }
 
-// Чистка старых служебных записей (раз в сутки около полуночи хватает, но запрос дешёвый).
+// Чистка старых служебных записей.
 if (date('H:i', $now) === '03:00') {
     $old = date('Y-m-d', strtotime('-60 days'));
-    db()->prepare('DELETE FROM sent WHERE date < ?')->execute([$old]);
-    db()->prepare('DELETE FROM namaz_cache WHERE date < ?')->execute([$old]);
+    $q('DELETE FROM sent WHERE date < ?', [$old]);
+    $q('DELETE FROM skipped WHERE date < ?', [$old]);
+    $q('DELETE FROM namaz_cache WHERE date < ?', [$old]);
 }
