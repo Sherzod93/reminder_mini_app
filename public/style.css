@@ -34,6 +34,10 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+/* Полосу прокрутки не показываем, как в мобильном приложении: на десктопе Telegram она то
+   появлялась, то пропадала между вкладками, меняла ширину окна, и нижнее меню прыгало. */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
 body {
   background: var(--bg);
   color: var(--label);
