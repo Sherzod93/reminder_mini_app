@@ -40,10 +40,11 @@ $buttons = static fn (string $ref, bool $namaz) => [
 ];
 
 /**
- * Одно напоминание: первое — когда наступил момент (не позже $window), повторы — каждые
- * $repeatEvery, пока не отмечено «бажарилди» или «вақтим йўқ» и не наступил $until.
+ * Одно напоминание: первое — когда наступил момент (не позже $window). Дальше, пока не отмечено
+ * «бажарилди» или «вақтим йўқ» и не наступил $until: если задан $onceAt — один повтор в этот
+ * момент (намаз), иначе повторы каждые $repeatEvery (задачи).
  */
-$process = static function (int $uid, string $ref, string $hhmm, int $beforeMin, int $until, bool $isNamaz, callable $text)
+$process = static function (int $uid, string $ref, string $hhmm, int $beforeMin, int $until, bool $isNamaz, callable $text, ?int $onceAt = null)
     use ($q, $now, $today, $window, $repeatEvery, $buttons, &$stat): void {
     $at = strtotime("$today $hhmm") - $beforeMin * 60;
     if ($at > $now) {
@@ -66,7 +67,13 @@ $process = static function (int $uid, string $ref, string $hhmm, int $beforeMin,
         $res = tg_send($uid, $text(false), $buttons($ref, $isNamaz));
         $stat['first']++;
     } else {
-        if ($now >= $until || $now - (int) $row['last_at'] < $repeatEvery) {
+        if ($now >= $until) {
+            return;
+        }
+        $notYet = $onceAt !== null
+            ? ((int) $row['repeats'] > 0 || $now < $onceAt)
+            : ($now - (int) $row['last_at'] < $repeatEvery);
+        if ($notYet) {
             return;
         }
         $q('UPDATE sent SET last_at = ?, repeats = repeats + 1 WHERE user_id = ? AND ref = ? AND date = ?', [$now, $uid, $ref, $today]);
@@ -87,13 +94,18 @@ $namaz = namaz_today();
 if ($namaz && $namaz['stale']) {
     $namaz = null; // не шлём намаз по вчерашнему времени
 }
-// Повторы намаза — до начала следующего намаза.
-$namazUntil = [];
+// Время намаза кончается с началом следующего (Хуфтон — в полночь). За warnBefore до конца —
+// одно напоминание, если намаз не отмечен.
+$warnBefore = (int) cfg('namaz_warn_before_next_min') * 60;
+$namazEnd = [];
 if ($namaz) {
     $keys = array_keys($namaz['times']);
     foreach ($keys as $i => $k) {
         $next = $keys[$i + 1] ?? null;
-        $namazUntil[$k] = $next ? strtotime("$today {$namaz['times'][$next]}") : $endOfDay;
+        $namazEnd[$k] = [
+            'at'    => $next ? strtotime("$today {$namaz['times'][$next]}") : $endOfDay + 1,
+            'label' => $next ? h($namaz['labels'][$next] ?? $next) : 'ярим тун',
+        ];
     }
 }
 
@@ -128,9 +140,14 @@ foreach ($users as $u) {
             continue;
         }
         $label = h($namaz['labels'][$key] ?? $key);
-        $process($uid, "n:$key", $time, $before, $namazUntil[$key], true, static fn (bool $repeat): string => $repeat
-            ? "🔁 <b>{$label}</b> намози ҳали ўқилмаган\n🕒 Вақти: {$time}"
-            : "🕌 <b>{$label}</b> намози вақти — {$time}" . $beforeText($before));
+        $end = $namazEnd[$key];
+        $warnAt = $end['at'] - $warnBefore;
+        $left = intdiv($end['at'] - $warnAt, 60);
+        $process($uid, "n:$key", $time, $before, $end['at'], true, static fn (bool $repeat): string => $repeat
+            ? "⏳ <b>{$label}</b> намози ҳали ўқилмаган\n{$end['label']}гача {$left} дақиқа қолди"
+            : "🕌 <b>{$label}</b> намози вақти — {$time}" . $beforeText($before),
+            // Если до следующего намаза меньше 45 минут от начала — предупреждать нечего.
+            $warnAt > strtotime("$today $time") ? $warnAt : PHP_INT_MAX);
     }
 }
 
