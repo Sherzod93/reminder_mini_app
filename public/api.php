@@ -183,6 +183,12 @@ function set_mark(int $uid, array $in, string $table): void
     // $table — из белого списка выше, в запрос подставляется безопасно.
     if (!empty($in[$flag])) {
         db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $ref, today()]);
+        // Отметили в приложении — убрать кнопки у сегодняшнего напоминания в чате.
+        $st = db()->prepare('SELECT msg_id FROM sent WHERE user_id = ? AND ref = ? AND date = ? AND msg_id IS NOT NULL');
+        $st->execute([$uid, $ref, today()]);
+        if ($msgId = (int) $st->fetchColumn()) {
+            tg_close_reminder($uid, $msgId, '');
+        }
     } else {
         db()->prepare("DELETE FROM $table WHERE user_id = ? AND ref = ? AND date = ?")->execute([$uid, $ref, today()]);
     }

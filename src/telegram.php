@@ -79,7 +79,33 @@ function tg_send(int $chatId, string $html, ?array $keyboard = null): array
     return $res;
 }
 
+/**
+ * Экранирование для parse_mode=HTML в Telegram. Telegram понимает только &lt; &gt; &amp; &quot;
+ * и числовые сущности — &apos; (ENT_HTML5) показывается как есть. Кавычки в тексте сообщения
+ * экранировать не нужно.
+ */
 function h(string $s): string
 {
-    return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return htmlspecialchars($s, ENT_NOQUOTES, 'UTF-8');
+}
+
+/**
+ * Убрать кнопки у напоминания, когда пункт отмечен. Если известен текст сообщения с разметкой
+ * (нажата кнопка в чате) — дописать итог строкой в конце, разметку сохранить.
+ */
+function tg_close_reminder(int $chatId, int $messageId, string $status, ?array $message = null): void
+{
+    if ($message !== null && isset($message['text'])) {
+        $res = tg_api('editMessageText', [
+            'chat_id'              => $chatId,
+            'message_id'           => $messageId,
+            'text'                 => $message['text'] . "\n\n" . $status,
+            'entities'             => $message['entities'] ?? [],
+            'link_preview_options' => ['is_disabled' => true],
+        ]);
+        if ($res['ok']) {
+            return; // без reply_markup кнопки исчезают
+        }
+    }
+    tg_api('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId]);
 }

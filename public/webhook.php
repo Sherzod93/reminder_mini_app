@@ -54,11 +54,7 @@ if (isset($update['callback_query'])) {
             db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $parts[1], $parts[2]]);
             $text = $parts[0] === 'd' ? '✅ Бажарилди' : '⏭ Бугун бошқа эслатилмайди';
             if (isset($cq['message']['message_id'])) {
-                tg_api('editMessageReplyMarkup', [
-                    'chat_id'      => $cq['message']['chat']['id'],
-                    'message_id'   => $cq['message']['message_id'],
-                    'reply_markup' => ['inline_keyboard' => [[['text' => $text, 'callback_data' => 'noop']]]],
-                ]);
+                tg_close_reminder((int) $cq['message']['chat']['id'], (int) $cq['message']['message_id'], $text, $cq['message']);
             }
         } else {
             $text = 'Вазифа топилмади';
