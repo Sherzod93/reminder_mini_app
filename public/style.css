@@ -227,6 +227,16 @@ main { padding: 0 0 16px; }
 }
 .grid td.none { color: var(--label3); }
 
+/* Удаление в строке списка задач: красная корзина, круглая зона нажатия 34px. */
+.del {
+  flex: none; align-self: center; width: 34px; height: 34px; padding: 0; margin-right: 2px;
+  border: 0; border-radius: 50%; cursor: pointer; color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  display: flex; align-items: center; justify-content: center; line-height: 0;
+}
+.del svg { width: 18px; height: 18px; }
+.del:active { opacity: .6; }
+
 .empty { text-align: center; color: var(--label2); padding: 40px 16px; font-size: 15px; }
 
 /* ---------- chips ---------- */

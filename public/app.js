@@ -16,6 +16,7 @@ const QUICK = [
   ['💧 Сув ичиш', '10:00'],
 ];
 const MOON = 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z';
+const TRASH = 'M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm4 2v8h2v-8zm3 0v8h2v-8z';
 
 let S = null;
 let tab = 'today';
@@ -36,14 +37,18 @@ function el(tag, attrs = {}, ...kids) {
   return n;
 }
 
-function icon(path, color) {
+function svgIcon(path) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   const p = document.createElementNS(ns, 'path');
   p.setAttribute('d', path);
   svg.append(p);
-  return el('span', { class: `row-icon ${color}` }, svg);
+  return svg;
+}
+
+function icon(path, color) {
+  return el('span', { class: `row-icon ${color}` }, svgIcon(path));
 }
 
 function haptic(kind = 'light') {
@@ -216,11 +221,16 @@ function renderTasks() {
     });
     const sub = [el('span', { class: 't' }, t.end_time ? `${t.time}–${t.end_time}` : t.time), ` · ${daysLabel(t.days)}`];
     if (t.remind_before) sub.push(` · 🔔 ${beforeLabel(t.remind_before)}`);
+    const del = el('button', {
+      type: 'button', class: 'del', 'aria-label': 'Ўчириш', title: 'Ўчириш',
+      onclick: (e) => { e.stopPropagation(); haptic(); confirmDelete(t); },
+    }, svgIcon(TRASH));
     list.append(el('li', { class: 'row task tap' + (t.enabled ? '' : ' off'), onclick: () => openEditor(t) },
       el('div', { class: 'task-body' },
         el('div', { class: 'task-title' }, t.title),
         el('div', { class: 'task-sub' }, sub),
       ),
+      del,
       sw,
     ));
   }
@@ -314,9 +324,16 @@ $('sheet').addEventListener('submit', async (e) => {
   try { await saveTask(body); closeEditor(); } catch (_) {}
 });
 
-$('delBtn').addEventListener('click', () => {
-  const t = editing;
-  const go = async () => { await api('task_delete', { id: t.id }); closeEditor(); toast('Ўчирилди'); };
+/** Удалить задачу после подтверждения (из формы и из списка). */
+function confirmDelete(t, after) {
+  const go = async () => {
+    try {
+      await api('task_delete', { id: t.id });
+      hapticOk();
+      if (after) after();
+      toast('Ўчирилди');
+    } catch (e) { toast('Хатолик: ' + e.message); }
+  };
   if (tg && tg.isVersionAtLeast && tg.isVersionAtLeast('6.2')) {
     tg.showPopup({
       title: 'Вазифани ўчириш',
@@ -324,7 +341,9 @@ $('delBtn').addEventListener('click', () => {
       buttons: [{ id: 'del', type: 'destructive', text: 'Ўчириш' }, { type: 'cancel' }],
     }, (id) => id === 'del' && go());
   } else if (confirm(`«${t.title}» ўчирилсинми?`)) go();
-});
+}
+
+$('delBtn').addEventListener('click', () => confirmDelete(editing, closeEditor));
 $('cancelBtn').addEventListener('click', closeEditor);
 $('sheetBg').addEventListener('click', closeEditor);
 $('addBtn').addEventListener('click', () => openEditor(null));
