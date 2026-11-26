@@ -11,6 +11,7 @@ require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/telegram.php';
 require __DIR__ . '/../src/namaz.php';
 require __DIR__ . '/../src/history.php';
+require __DIR__ . '/../src/qazo.php';
 
 $lock = fopen(dirname((string) cfg('db_path')) . '/cron.lock', 'c');
 if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
@@ -145,6 +146,7 @@ if ($namaz) {
 // После полуночи — сохранить итог вчерашнего дня всем, включая тех, кому бот писать не может.
 foreach ($q('SELECT id FROM users')->fetchAll() as $row) {
     close_days((int) $row['id']);
+    qazo_check((int) $row['id']); // время намаза кончилось без отметки — в Қазо дафтари
 }
 
 $users = $q('SELECT id, namaz_enabled, namaz_before FROM users WHERE can_message = 1')->fetchAll();

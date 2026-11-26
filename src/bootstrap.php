@@ -119,6 +119,17 @@ function db_migrate(PDO $pdo): void
             date    TEXT    NOT NULL,
             PRIMARY KEY (user_id, date)
         );
+        -- Қазо дафтари: намаз, не отмеченный до конца своего времени, — qazo; Хуфтон, не
+        -- отмеченный до утреннего Бомдода, — qarz. made_up_at — когда восполнен (адо).
+        CREATE TABLE IF NOT EXISTS namaz_log (
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            date       TEXT    NOT NULL,         -- день намаза (для Хуфтона — вечер, не утро)
+            prayer     TEXT    NOT NULL,
+            status     TEXT    NOT NULL,         -- qazo | qarz
+            decided_at TEXT    NOT NULL,
+            made_up_at TEXT,
+            PRIMARY KEY (user_id, date, prayer)
+        );
         -- «Сегодня нет времени»: повторы напоминаний на этот день прекращаются.
         CREATE TABLE IF NOT EXISTS skipped (
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

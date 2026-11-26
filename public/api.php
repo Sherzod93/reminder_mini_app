@@ -5,6 +5,7 @@ require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/telegram.php';
 require __DIR__ . '/../src/namaz.php';
 require __DIR__ . '/../src/history.php';
+require __DIR__ . '/../src/qazo.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -52,6 +53,8 @@ try {
         ['POST', 'task_delete'] => task_delete($uid, $in),
         ['POST', 'done']        => set_mark($uid, $in, 'done'),
         ['POST', 'skip']        => set_mark($uid, $in, 'skipped'),
+        ['GET', 'qazo']         => out(['items' => qazo_list($uid), 'today' => today()]),
+        ['POST', 'qazo_made_up'] => qazo_made_up($uid, $in),
         ['POST', 'settings']    => save_settings($uid, $in),
         default                 => fail('not found', 404),
     };
@@ -85,6 +88,13 @@ function state(int $uid): array
     $sk->execute([$uid, today()]);
 
     $namaz = namaz_today();
+    qazo_check($uid);
+    $ql = db()->prepare('SELECT prayer, status, made_up_at FROM namaz_log WHERE user_id = ? AND date = ?');
+    $ql->execute([$uid, today()]);
+    $qazoToday = [];
+    foreach ($ql as $r) {
+        $qazoToday[$r['prayer']] = ['status' => $r['status'], 'made_up' => $r['made_up_at'] !== null];
+    }
     return [
         'today'    => today(),
         'weekday'  => (int) date('N'),
@@ -104,7 +114,37 @@ function state(int $uid): array
         'tasks'    => $tasks,
         'done'     => array_column($d->fetchAll(), 'ref'),
         'skipped'  => array_column($sk->fetchAll(), 'ref'),
+        'qazo'     => (object) $qazoToday,
+        // Час между полуночью и Бомдодом: вчерашний Хуфтон ещё можно прочитать вовремя.
+        'prev_xufton' => prev_xufton($uid, (bool) $u['namaz_enabled']),
+        // До какого времени идёт каждый сегодняшний намаз (для значка «Қазо» без ожидания cron).
+        'deadlines' => (object) array_map(fn ($k) => ($dl = qazo_deadline(today(), $k)) ? date('Y-m-d H:i', $dl) : null,
+            array_combine(NAMAZ_KEYS, NAMAZ_KEYS)),
     ];
+}
+
+function prev_xufton(int $uid, bool $namazOn): ?array
+{
+    $y = date('Y-m-d', strtotime('-1 day'));
+    $t = namaz_raw($y)['xufton'] ?? null;
+    if (!$namazOn || !$t || !namaz_user_settings($uid)['xufton'] || !namaz_in_time($y, 'xufton')) {
+        return null;
+    }
+    $st = db()->prepare("SELECT 1 FROM done WHERE user_id = ? AND date = ? AND ref = 'n:xufton'");
+    $st->execute([$uid, $y]);
+    return ['date' => $y, 'time' => $t, 'done' => (bool) $st->fetch(),
+            'until' => date('H:i', (int) qazo_deadline($y, 'xufton'))];
+}
+
+function qazo_made_up(int $uid, array $in): void
+{
+    $date = (string) ($in['date'] ?? '');
+    $key = (string) ($in['prayer'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !in_array($key, NAMAZ_KEYS, true)
+        || !qazo_set_made_up($uid, $date, $key, !empty($in['made_up']))) {
+        throw new InvalidArgumentException('qazo not found');
+    }
+    out(['items' => qazo_list($uid), 'today' => today()]);
 }
 
 function task_save(int $uid, array $in): void
@@ -188,17 +228,26 @@ function set_mark(int $uid, array $in, string $table): void
     } elseif (!preg_match('/^n:(' . implode('|', NAMAZ_KEYS) . ')$/', $ref)) {
         throw new InvalidArgumentException('ref');
     }
+    // Дата — сегодня; вчера — только Хуфтон, пока не наступил Бомдод.
+    $date = (string) ($in['date'] ?? today());
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+    if ($date !== today() && !($date === $yesterday && $ref === 'n:xufton' && namaz_in_time($yesterday, 'xufton'))) {
+        throw new InvalidArgumentException('date');
+    }
     // $table — из белого списка выше, в запрос подставляется безопасно.
     if (!empty($in[$flag])) {
-        db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $ref, today()]);
+        db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $ref, $date]);
         // Отметили в приложении — убрать кнопки у сегодняшнего напоминания в чате.
         $st = db()->prepare('SELECT msg_id FROM sent WHERE user_id = ? AND ref = ? AND date = ? AND msg_id IS NOT NULL');
-        $st->execute([$uid, $ref, today()]);
+        $st->execute([$uid, $ref, $date]);
         if ($msgId = (int) $st->fetchColumn()) {
             tg_close_reminder($uid, $msgId, '');
         }
     } else {
-        db()->prepare("DELETE FROM $table WHERE user_id = ? AND ref = ? AND date = ?")->execute([$uid, $ref, today()]);
+        db()->prepare("DELETE FROM $table WHERE user_id = ? AND ref = ? AND date = ?")->execute([$uid, $ref, $date]);
+    }
+    if ($table === 'done') {
+        namaz_done_changed($uid, $ref, $date, !empty($in[$flag])); // поздняя отметка Қазо = адо
     }
 }
 

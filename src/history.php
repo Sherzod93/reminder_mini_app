@@ -34,24 +34,27 @@ function day_plan(int $uid, string $date): array
     $dayEndUtc = gmdate('Y-m-d H:i:s', strtotime("$date 23:59:59"));
     $items = [];
 
-    $st = db()->prepare("SELECT id, title, time, end_time, days FROM tasks
+    $st = db()->prepare("SELECT id, title, time, end_time, days, created_at FROM tasks
                          WHERE user_id = ? AND enabled = 1 AND created_at <= ?");
     $st->execute([$uid, $dayEndUtc]);
     foreach ($st as $t) {
         if (str_contains($t['days'], $weekday)) {
             $items[] = ['ref' => 't:' . $t['id'], 'kind' => 'task', 'title' => $t['title'],
-                        'time' => $t['time'], 'end_time' => $t['end_time']];
+                        'time' => $t['time'], 'end_time' => $t['end_time'],
+                        'since' => strtotime($t['created_at'] . ' UTC')];
         }
     }
 
-    $u = db()->prepare('SELECT namaz_enabled FROM users WHERE id = ?');
+    $u = db()->prepare('SELECT namaz_enabled, created_at FROM users WHERE id = ?');
     $u->execute([$uid]);
-    $namaz = $u->fetchColumn() ? namaz_for_date($date) : null;
+    $u = $u->fetch();
+    $userSince = $u ? strtotime($u['created_at'] . ' UTC') : 0;
+    $namaz = ($u && $u['namaz_enabled']) ? namaz_for_date($date) : null;
     if ($namaz) {
         foreach (namaz_user_settings($uid) as $key => $on) {
             if ($on && isset($namaz['times'][$key])) {
                 $items[] = ['ref' => "n:$key", 'kind' => 'namaz', 'title' => $namaz['labels'][$key] ?? $key,
-                            'time' => $namaz['times'][$key], 'end_time' => ''];
+                            'time' => $namaz['times'][$key], 'end_time' => '', 'since' => $userSince];
             }
         }
     }
@@ -65,8 +68,13 @@ function day_plan(int $uid, string $date): array
         }
     }
     $past = $date < today();
+    // Время пункта наступило раньше регистрации (намаз) или создания задачи — без отметки
+    // его не учитываем: пропустить его было нельзя.
+    $items = array_values(array_filter($items, fn ($it) => isset($marks[$it['ref']])
+        || strtotime("$date {$it['time']}") >= $it['since']));
     foreach ($items as &$it) {
         $it['status'] = $marks[$it['ref']] ?? ($past ? 'missed' : 'pending');
+        unset($it['since']);
     }
     unset($it);
 

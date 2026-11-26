@@ -105,12 +105,21 @@ async function api(action, body) {
 function todayItems() {
   const items = [];
   if (S.namaz && S.user.namaz_enabled) {
-    const times = Object.values(S.namaz.times);
-    for (const [i, [key, time]] of Object.entries(S.namaz.times).entries()) {
+    for (const [key, time] of Object.entries(S.namaz.times)) {
       if (!S.prayers[key]) continue;
+      // Время намаза кончается по deadlines (Бомдод — восход); Хуфтон — уже завтра.
+      const dl = S.deadlines && S.deadlines[key];
       items.push({
-        ref: `n:${key}`, time, namaz: true, until: times[i + 1] || null,
-        title: `${S.namaz.labels[key]} намози`,
+        ref: `n:${key}`, key, time, namaz: true,
+        deadline: dl || null, until: dl ? (dl.startsWith(S.today) ? dl.slice(11) : '24:00') : null,
+        title: `${nlabel(key)} намози`,
+      });
+    }
+    // После полуночи и до Бомдода — вчерашний Хуфтон ещё можно прочитать вовремя.
+    if (S.prev_xufton) {
+      items.push({
+        ref: 'n:xufton', key: 'xufton', time: S.prev_xufton.time, sortTime: '00:00', namaz: true, prev: true,
+        date: S.prev_xufton.date, until: S.prev_xufton.until, title: 'Кечаги Хуфтон намози',
       });
     }
   }
@@ -121,7 +130,7 @@ function todayItems() {
       title: t.title, note: t.note, task: t,
     });
   }
-  items.sort((a, b) => a.time.localeCompare(b.time) || (a.namaz ? -1 : 1));
+  items.sort((a, b) => (a.sortTime || a.time).localeCompare(b.sortTime || b.time) || (a.namaz ? -1 : 1));
   return items;
 }
 
@@ -134,10 +143,14 @@ function renderToday() {
   list.replaceChildren();
 
   const skipped = new Set(S.skipped || []);
+  const nowFull = `${S.today} ${now}`;
   for (const it of items) {
-    const isDone = done.has(it.ref);
-    const isSkipped = !isDone && skipped.has(it.ref);
-    const started = it.time < now;
+    const isDone = it.prev ? S.prev_xufton.done : done.has(it.ref);
+    const isSkipped = !it.prev && !isDone && skipped.has(it.ref);
+    const started = it.prev || it.time < now;
+    // Қазо: время намаза кончилось без отметки (или уже записано в дафтари).
+    const q = it.namaz && !it.prev ? (S.qazo || {})[it.key] : null;
+    const expired = it.namaz && !it.prev && !!it.deadline && it.deadline <= nowFull;
     const inProgress = !!it.end && started && it.end > now; // идёт сейчас — не просрочено
     const late = started && !inProgress;
     let cls = 'row task' + (it.namaz ? ' namaz' : '') + (isDone ? ' done' : '') + (late ? ' late' : '') + (isSkipped ? ' skipped' : '');
@@ -145,24 +158,30 @@ function renderToday() {
 
     const sub = [el('span', { class: 't' }, it.end ? `${it.time}–${it.end}` : it.time)];
     if (inProgress && !isDone) sub.push(' · ҳозир');
+    if (it.prev && !isDone) sub.push(` · ${it.until} гача`);
     if (isSkipped) sub.push(' · ⏭ Бугун ўтказилди');
     if (it.task && it.task.remind_before) sub.push(` · 🔔 ${beforeLabel(it.task.remind_before)}`);
     if (it.note) sub.push(` · ${it.note}`);
 
     // Началось и не сделано: «Ўтказиш» — сегодня больше не напоминать. Намаз напоминается до
     // следующего намаза, задача с окончанием — до окончания; после этого кнопка не нужна.
-    const stillReminded = !it.until || it.until > now;
-    const pill = !isDone && started && stillReminded
+    const stillReminded = it.namaz ? !expired : (!it.until || it.until > now);
+    let badge = it.namaz ? el('span', { class: 'badge' }, it.prev ? 'Кеча' : 'Намоз') : null;
+    if (q || (expired && !isDone)) {
+      const ado = isDone || (q && q.made_up);
+      badge = el('span', { class: 'badge ' + (ado ? 'ado' : 'qazo') }, ado ? 'Адо' : (q && q.status === 'qarz' ? 'Қарз' : 'Қазо'));
+    }
+    const pill = !isDone && started && stillReminded && !it.prev
       ? el('button', {
         class: 'pill' + (isSkipped ? ' on' : ''), type: 'button',
         onclick: (e) => { e.stopPropagation(); toggleSkip(it.ref, !isSkipped); },
       }, isSkipped ? 'Қайтариш' : 'Ўтказиш')
-      : (it.namaz ? el('span', { class: 'badge' }, 'Намоз') : null);
+      : badge;
 
     list.append(el('li', { class: cls + (it.task ? ' tap' : '') },
       el('button', {
         class: 'check' + (isDone ? ' on' : ''), type: 'button', 'aria-label': 'Бажарилди',
-        onclick: (e) => { e.stopPropagation(); toggleDone(it.ref, !isDone); },
+        onclick: (e) => { e.stopPropagation(); toggleDone(it.ref, !isDone, it.prev ? it.date : undefined); },
       }),
       el('div', { class: 'task-body', onclick: () => it.task && openEditor(it.task) },
         el('div', { class: 'task-title' }, it.title),
@@ -173,8 +192,8 @@ function renderToday() {
   }
   $('todayEmpty').hidden = items.length > 0;
 
-  const total = items.length;
-  const doneCount = items.filter((i) => done.has(i.ref)).length;
+  const total = items.filter((i) => !i.prev).length;
+  const doneCount = items.filter((i) => !i.prev && done.has(i.ref)).length;
   $('ringText').textContent = `${doneCount}/${total}`;
   const p = total ? doneCount / total : 0;
   $('ringFg').style.strokeDashoffset = String(97.4 * (1 - p));
@@ -186,16 +205,17 @@ function renderToday() {
   $('hero').hidden = !next;
   if (next) {
     $('heroLabel').textContent = `Кейинги намоз · ${untilText(next[1])}`;
-    $('heroTitle').textContent = S.namaz.labels[next[0]];
+    $('heroTitle').textContent = nlabel(next[0]);
     $('heroTime').textContent = next[1];
   }
 }
 
-async function toggleDone(ref, value) {
+async function toggleDone(ref, value, date) {
   value ? hapticOk() : haptic();
-  S.done = value ? [...S.done, ref] : S.done.filter((r) => r !== ref);
+  if (date) S.prev_xufton.done = value; // вчерашний Хуфтон
+  else S.done = value ? [...S.done, ref] : S.done.filter((r) => r !== ref);
   render();
-  try { await api('done', { ref, done: value }); } catch (e) { toast('Хатолик: ' + e.message); load(); }
+  try { await api('done', { ref, done: value, date }); } catch (e) { toast('Хатолик: ' + e.message); load(); }
 }
 
 async function toggleSkip(ref, value) {
@@ -262,6 +282,9 @@ function openEditor(task) {
   if (tg) tg.BackButton.show();
   if (!t.title) setTimeout(() => f.elements.title.focus(), 300);
 }
+
+/** Название намаза: из API, а если его нет — своё. */
+function nlabel(key) { return (S.namaz && S.namaz.labels[key]) || QLABEL[key] || key; }
 
 /** Время окончания: переключатель включает поле; по умолчанию — начало + 1 час. */
 function setEnd(value) {
@@ -362,7 +385,7 @@ function renderSettings() {
   for (const [key, time] of Object.entries(S.namaz.times)) {
     box.append(el('li', { class: 'row' },
       icon(MOON, 'indigo'),
-      el('span', { class: 'row-title' }, S.namaz.labels[key]),
+      el('span', { class: 'row-title' }, nlabel(key)),
       el('span', { class: 'row-value' }, time),
       el('input', {
         type: 'checkbox', class: 'switch', checked: !!S.prayers[key], disabled: !S.user.namaz_enabled,
@@ -498,6 +521,152 @@ document.querySelectorAll('#statsSeg button').forEach((b) => b.addEventListener(
   document.querySelectorAll('#statsSeg button').forEach((x) => x.classList.toggle('on', x === b));
   try { tg.HapticFeedback.selectionChanged(); } catch (_) {}
   loadStats();
+}));
+
+/* ---------- қазо дафтари ---------- */
+
+const QK = ['bomdod', 'peshin', 'asr', 'shom', 'xufton'];
+const QLABEL = { bomdod: 'Бомдод', peshin: 'Пешин', asr: 'Аср', shom: 'Шом', xufton: 'Хуфтон' };
+const MONTHS_CAP = ['Январ', 'Феврал', 'Март', 'Апрел', 'Май', 'Июн', 'Июл', 'Август', 'Сентябр', 'Октябр', 'Ноябр', 'Декабр'];
+let QZ = null;
+let qazoPeriod = 'day';
+
+async function loadQazo() {
+  try {
+    const res = await fetch('api.php?action=qazo', { headers: { 'X-Telegram-Init-Data': tg ? tg.initData : '' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    QZ = await res.json();
+    renderQazo();
+  } catch (e) { toast('Хатолик: ' + e.message); }
+}
+
+/** Понедельник недели даты (YYYY-MM-DD) — ключ группировки «Ҳафта». */
+function weekStart(date) {
+  const d = new Date(`${date}T12:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+function shortDate(date) {
+  const [y, m, d] = date.split('-').map(Number);
+  // Год — только если не текущий, иначе «11 ноябр» прошлого года не отличить.
+  return `${d} ${MONTHS[m - 1]}` + (String(y) !== QZ.today.slice(0, 4) ? ` ${y}` : '');
+}
+function periodKey(date) {
+  if (qazoPeriod === 'week') return weekStart(date);
+  if (qazoPeriod === 'month') return date.slice(0, 7);
+  return date.slice(0, 4);
+}
+function periodLabel(key) {
+  if (qazoPeriod === 'week') {
+    const end = new Date(`${key}T12:00:00`);
+    end.setDate(end.getDate() + 6);
+    return `${shortDate(key)} – ${shortDate(end.toISOString().slice(0, 10))}`;
+  }
+  if (qazoPeriod === 'month') return `${MONTHS_CAP[Number(key.slice(5)) - 1]} ${key.slice(0, 4)}`;
+  return key;
+}
+
+function renderQazo() {
+  const items = QZ.items;
+  const qazo = items.filter((i) => i.status === 'qazo').length;
+  const qarz = items.filter((i) => i.status === 'qarz').length;
+  const ado = items.filter((i) => i.made_up).length;
+  const card = (label, value, cls) => el('div', { class: 'card' },
+    el('div', { class: 'card-label' }, label), el('div', { class: 'card-value ' + (cls || '') }, String(value)));
+  $('qazoCards').replaceChildren(
+    card('Қазо', qazo, 'c-orange'), card('Қарз', qarz, 'c-red'),
+    card('Адо қилинди', ado, 'c-green'), card('Қолди', items.length - ado));
+
+  const grid = $('qazoGrid');
+  if (!items.length) {
+    grid.replaceChildren(el('tbody', {}, el('tr', {}, el('td', { class: 'none qempty' }, 'Қазо намоз йўқ — офарин! 🤲'))));
+    $('qazoFoot').textContent = '';
+    return;
+  }
+
+  if (qazoPeriod === 'day') {
+    // Строки — даты (новые сверху), столбцы — намазы. Нажатие на ячейку — адо / вернуть.
+    const byDate = new Map();
+    for (const it of items) {
+      if (!byDate.has(it.date)) byDate.set(it.date, {});
+      byDate.get(it.date)[it.prayer] = it;
+    }
+    const head = el('tr', {}, el('th', { class: 'sticky' }, 'Сана'), ...QK.map((k) => el('th', {}, QLABEL[k].slice(0, 3))));
+    const rows = [...byDate.entries()].map(([date, cells]) => el('tr', {},
+      el('th', { class: 'sticky' }, shortDate(date)),
+      ...QK.map((k) => {
+        const it = cells[k];
+        if (!it) return el('td', { class: 'none' }, '');
+        const label = it.status === 'qarz' ? 'Қарз' : 'Қазо';
+        return el('td', {
+          class: 'qcell ' + (it.made_up ? 'ado' : it.status),
+          title: `${QLABEL[k]}, ${shortDate(date)}: ${label}${it.made_up ? ' · адо қилинди' : ''}`,
+          onclick: () => toggleMadeUp(it),
+        }, el('span', {}, it.made_up ? `✓ ${label}` : label));
+      })));
+    grid.replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
+    $('qazoFoot').textContent = 'Ячейкани босинг — адо қилинди деб белгиланади. Қазо — вақтида ўқилмаган, Қарз — Хуфтон Бомдодгача ўқилмаган.';
+    return;
+  }
+
+  // Ҳафта / Ой / Йил: строки — периоды, столбцы — итоги.
+  const agg = new Map();
+  for (const it of items) {
+    const key = periodKey(it.date);
+    if (!agg.has(key)) agg.set(key, { qazo: 0, qarz: 0, ado: 0, total: 0 });
+    const a = agg.get(key);
+    a[it.status]++; a.total++;
+    if (it.made_up) a.ado++;
+  }
+  const head = el('tr', {}, el('th', { class: 'sticky' }, { week: 'Ҳафта', month: 'Ой', year: 'Йил' }[qazoPeriod]),
+    el('th', {}, 'Қазо'), el('th', {}, 'Қарз'), el('th', {}, 'Адо'), el('th', {}, 'Қолди'));
+  const rows = [...agg.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([key, a]) => el('tr', {},
+    el('th', { class: 'sticky' }, periodLabel(key)),
+    el('td', { class: a.qazo ? 'n-orange' : 'none' }, String(a.qazo)),
+    el('td', { class: a.qarz ? 'n-red' : 'none' }, String(a.qarz)),
+    el('td', { class: a.ado ? 'n-green' : 'none' }, String(a.ado)),
+    el('td', { class: 'n-strong' }, String(a.total - a.ado))));
+  grid.replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
+  $('qazoFoot').textContent = 'Қолди — ҳали адо қилинмаган Қазо ва Қарз намозлар.';
+}
+
+function toggleMadeUp(it) {
+  const label = `${QLABEL[it.prayer]}, ${shortDate(it.date)}`;
+  const go = async () => {
+    try {
+      const res = await fetch('api.php?action=qazo_made_up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg ? tg.initData : '' },
+        body: JSON.stringify({ date: it.date, prayer: it.prayer, made_up: !it.made_up }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      QZ = await res.json();
+      it.made_up ? haptic() : hapticOk();
+      renderQazo();
+      toast(it.made_up ? '↩️ Адо бекор қилинди' : '✓ Адо қилинди');
+    } catch (e) { toast('Хатолик: ' + e.message); }
+  };
+  const msg = it.made_up ? `${label}: адо белгисини олиб ташлансинми?` : `${label}: адо қилдингизми?`;
+  if (tg && tg.isVersionAtLeast && tg.isVersionAtLeast('6.2')) {
+    tg.showPopup({ title: 'Қазо дафтари', message: msg,
+      buttons: [{ id: 'ok', type: 'default', text: it.made_up ? 'Олиб ташлаш' : 'Адо қилдим' }, { type: 'cancel' }] },
+    (id) => id === 'ok' && go());
+  } else if (confirm(msg)) go();
+}
+
+document.querySelectorAll('#namazSeg button').forEach((b) => b.addEventListener('click', () => {
+  const qazo = b.dataset.view === 'qazo';
+  document.querySelectorAll('#namazSeg button').forEach((x) => x.classList.toggle('on', x === b));
+  $('qazoBook').hidden = !qazo;
+  $('namazSettings').hidden = qazo;
+  try { tg.HapticFeedback.selectionChanged(); } catch (_) {}
+  if (qazo) loadQazo();
+}));
+document.querySelectorAll('#qazoSeg button').forEach((b) => b.addEventListener('click', () => {
+  qazoPeriod = b.dataset.period;
+  document.querySelectorAll('#qazoSeg button').forEach((x) => x.classList.toggle('on', x === b));
+  try { tg.HapticFeedback.selectionChanged(); } catch (_) {}
+  if (QZ) renderQazo();
 }));
 
 /* ---------- shell ---------- */

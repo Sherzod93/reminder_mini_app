@@ -231,6 +231,32 @@ main { padding: 0 0 16px; }
 }
 .grid td.none { color: var(--label3); }
 
+/* Қазо / Қарз / Адо: цвет вместе с подписью, не только цветом. */
+.badge.qazo { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.badge.ado { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+
+/* ---------- қазо дафтари ---------- */
+#qazoBook .seg { margin-top: 12px; }
+#qazoBook .table-wrap { margin-top: 12px; }
+.card-value.c-orange { color: var(--orange); }
+.card-value.c-red { color: var(--red); }
+.card-value.c-green { color: var(--green); }
+.qgrid { font-size: 14px; }
+.qgrid .sticky { min-width: 64px; }
+.qgrid td.qcell { cursor: pointer; padding: 5px 3px; }
+.qgrid td.qcell span {
+  display: inline-block; min-width: 42px; padding: 3px 6px; border-radius: 6px; font-size: 12px; font-weight: 600;
+}
+.qgrid td.qazo span { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.qgrid td.qarz span { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.qgrid td.ado span { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.qgrid td.qcell:active span { opacity: .6; }
+.qgrid .n-orange { color: var(--orange); font-weight: 600; }
+.qgrid .n-red { color: var(--red); font-weight: 600; }
+.qgrid .n-green { color: var(--green); font-weight: 600; }
+.qgrid .n-strong { font-weight: 700; }
+.qgrid .qempty { padding: 24px 12px; text-align: center; white-space: normal; }
+
 /* Удаление в строке списка задач: красная корзина, круглая зона нажатия 34px. */
 .del {
   flex: none; align-self: center; width: 34px; height: 34px; padding: 0; margin-right: 2px;

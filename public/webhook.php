@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/telegram.php';
+require __DIR__ . '/../src/qazo.php';
 
 $secret = secret('WEBHOOK_SECRET');
 if ($secret === '' || !hash_equals($secret, (string) ($_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? ''))) {
@@ -52,6 +53,9 @@ if (isset($update['callback_query'])) {
         if ($ok) {
             $table = $parts[0] === 'd' ? 'done' : 'skipped';
             db()->prepare("INSERT OR IGNORE INTO $table (user_id, ref, date) VALUES (?, ?, ?)")->execute([$uid, $parts[1], $parts[2]]);
+            if ($table === 'done') {
+                namaz_done_changed($uid, $parts[1], $parts[2], true); // поздняя отметка Қазо = адо
+            }
             $text = $parts[0] === 'd' ? '✅ Бажарилди' : '⏭ Бугун бошқа эслатилмайди';
             if (isset($cq['message']['message_id'])) {
                 tg_close_reminder((int) $cq['message']['chat']['id'], (int) $cq['message']['message_id'], $text, $cq['message']);

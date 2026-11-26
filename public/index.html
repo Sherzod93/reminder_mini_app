@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
   <title>Вазифалар</title>
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -74,6 +74,24 @@
       </section>
 
       <section class="tab" data-tab="settings" hidden>
+        <div class="seg" id="namazSeg">
+          <button type="button" data-view="settings" class="on">Созламалар</button>
+          <button type="button" data-view="qazo">Қазо дафтари</button>
+        </div>
+
+        <div id="qazoBook" hidden>
+          <div class="cards" id="qazoCards"></div>
+          <div class="seg" id="qazoSeg">
+            <button type="button" data-period="day" class="on">Кун</button>
+            <button type="button" data-period="week">Ҳафта</button>
+            <button type="button" data-period="month">Ой</button>
+            <button type="button" data-period="year">Йил</button>
+          </div>
+          <div class="group table-wrap"><table class="grid qgrid" id="qazoGrid"></table></div>
+          <p class="group-foot" id="qazoFoot"></p>
+        </div>
+
+        <div id="namazSettings">
         <ul class="group">
           <li class="row">
             <span class="row-icon green"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
@@ -89,6 +107,7 @@
         <div class="group-head">Бугунги вақтлар</div>
         <ul class="group" id="prayerList"></ul>
         <p class="group-foot" id="namazHint"></p>
+        </div>
       </section>
     </main>
 
@@ -158,6 +177,6 @@
     <p>Бу иловани Telegram орқали очинг.</p>
   </div>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

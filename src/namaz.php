@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 // Только пять намазов; quyosh (восход) из API не показываем и не напоминаем.
 const NAMAZ_KEYS = ['bomdod', 'peshin', 'asr', 'shom', 'xufton'];
+// В кэш пишем и восход: им кончается время Бомдода (учёт Қазо).
+const NAMAZ_CACHE_KEYS = ['bomdod', 'quyosh', 'peshin', 'asr', 'shom', 'xufton'];
 
 /**
  * Время намаза на сегодня: ['date', 'times' => [key => 'HH:MM'], 'labels' => [key => 'Бомдод'], 'stale' => bool].
@@ -25,8 +27,10 @@ function namaz_today_raw(): ?array
     $today = today();
     $st = db()->prepare('SELECT data FROM namaz_cache WHERE date = ?');
     $st->execute([$today]);
-    if ($row = $st->fetch()) {
-        return json_decode($row['data'], true) + ['stale' => false];
+    $cached = ($row = $st->fetch()) ? json_decode($row['data'], true) : null;
+    // Кэш до этой правки без восхода — перезапросить один раз (при сбое источника он остаётся).
+    if ($cached && isset($cached['times']['quyosh'])) {
+        return $cached + ['stale' => false];
     }
 
     // Не долбим источник при сбое чаще раза в 5 минут.
@@ -41,6 +45,9 @@ function namaz_today_raw(): ?array
     }
     if (!$fresh) {
         @touch($failFlag);
+    }
+    if ($cached) {
+        return $cached + ['stale' => false];
     }
 
     $last = db()->query('SELECT data FROM namaz_cache ORDER BY date DESC LIMIT 1')->fetch();
@@ -71,7 +78,7 @@ function namaz_fetch(): ?array
         return null;
     }
     $out = ['date' => $date, 'times' => [], 'labels' => []];
-    foreach (NAMAZ_KEYS as $k) {
+    foreach (NAMAZ_CACHE_KEYS as $k) {
         $t = (string) ($times[$k] ?? '');
         if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) {
             continue;
