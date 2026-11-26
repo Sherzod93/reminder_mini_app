@@ -128,20 +128,11 @@ $namaz = namaz_today();
 if ($namaz && $namaz['stale']) {
     $namaz = null; // не шлём намаз по вчерашнему времени
 }
-// Время намаза кончается с началом следующего (Хуфтон — в полночь). За warnBefore до конца —
-// одно напоминание, если намаз не отмечен.
+// За warnBefore до конца времени намаза — одно напоминание, если не отмечен. Граница та же, что
+// у Қазо дафтари (qazo_deadline): Бомдод — восход, Хуфтон — Бомдод следующего утра (его
+// предупреждение уходит утром, отдельным шагом ниже).
 $warnBefore = (int) cfg('namaz_warn_before_next_min') * 60;
-$namazEnd = [];
-if ($namaz) {
-    $keys = array_keys($namaz['times']);
-    foreach ($keys as $i => $k) {
-        $next = $keys[$i + 1] ?? null;
-        $namazEnd[$k] = [
-            'at'    => $next ? strtotime("$today {$namaz['times'][$next]}") : $endOfDay + 1,
-            'label' => $next ? h($namaz['labels'][$next] ?? $next) : 'ярим тун',
-        ];
-    }
-}
+const WARN_UNTIL_LABEL = ['bomdod' => 'Қуёш', 'peshin' => 'Аср', 'asr' => 'Шом', 'shom' => 'Хуфтон'];
 
 // После полуночи — сохранить итог вчерашнего дня всем, включая тех, кому бот писать не может.
 foreach ($q('SELECT id FROM users')->fetchAll() as $row) {
@@ -186,14 +177,43 @@ foreach ($users as $u) {
             continue;
         }
         $label = h($namaz['labels'][$key] ?? $key);
-        $end = $namazEnd[$key];
-        $warnAt = $end['at'] - $warnBefore;
-        $left = intdiv($end['at'] - $warnAt, 60);
-        $process($uid, "n:$key", $time, $before, $end['at'], true, static fn (bool $repeat): string => $repeat
-            ? "⏳ <b>{$label}</b> намози ҳали ўқилмаган\n{$end['label']}гача {$left} дақиқа қолди"
+        $endAt = $key === 'xufton' ? null : qazo_deadline($today, $key);
+        $warnAt = $endAt ? $endAt - $warnBefore : PHP_INT_MAX;
+        $left = intdiv($warnBefore, 60);
+        $untilLabel = WARN_UNTIL_LABEL[$key] ?? '';
+        $process($uid, "n:$key", $time, $before, $endAt ?? $endOfDay + 1, true, static fn (bool $repeat): string => $repeat
+            ? "⏳ <b>{$label}</b> намози ҳали ўқилмаган\n{$untilLabel}гача {$left} дақиқа қолди"
             : "🕌 <b>{$label}</b> намози вақти — {$time}" . $beforeText($before),
-            // Если до следующего намаза меньше 45 минут от начала — предупреждать нечего.
+            // Хуфтон — утром (ниже); если от начала до конца меньше 45 минут — предупреждать нечего.
             $warnAt > strtotime("$today $time") ? $warnAt : PHP_INT_MAX);
+    }
+
+    // Вчерашний Хуфтон не отмечен — за 45 минут до сегодняшнего Бомдода одно напоминание.
+    // Только если вечером о нём напоминали; кнопки отмечают вчерашнюю дату.
+    $y = date('Y-m-d', strtotime('-1 day', $now));
+    $dl = namaz_user_settings($uid)['xufton'] ? qazo_deadline($y, 'xufton') : null;
+    if ($dl && $now >= $dl - $warnBefore && $now < $dl) {
+        $row = $q('SELECT msg_id, repeats FROM sent WHERE user_id = ? AND ref = ? AND date = ?', [$uid, 'n:xufton', $y])->fetch();
+        $marked = $q('SELECT 1 FROM done WHERE user_id = ? AND ref = ? AND date = ?', [$uid, 'n:xufton', $y])->fetch()
+            || $q('SELECT 1 FROM skipped WHERE user_id = ? AND ref = ? AND date = ?', [$uid, 'n:xufton', $y])->fetch();
+        if ($row && (int) $row['repeats'] === 0 && !$marked) {
+            $q('UPDATE sent SET repeats = 1, last_at = ? WHERE user_id = ? AND ref = ? AND date = ?', [$now, $uid, 'n:xufton', $y]);
+            if ($row['msg_id']) {
+                tg_api('deleteMessage', ['chat_id' => $uid, 'message_id' => (int) $row['msg_id']]); // вечернее
+            }
+            $res = tg_send($uid, "⏳ <b>Хуфтон</b> намози ҳали ўқилмаган\nБомдодгача (" . date('H:i', $dl) . ') '
+                . intdiv($warnBefore, 60) . ' дақиқа қолди', [
+                [
+                    ['text' => '✅ Бажарилди', 'callback_data' => "d|n:xufton|$y"],
+                    ['text' => '🔕 Эслатмасин', 'callback_data' => "s|n:xufton|$y"],
+                ],
+                [['text' => '📋 Очиш', 'web_app' => ['url' => $appUrl]]],
+            ]);
+            if (!empty($res['ok'])) {
+                $q('UPDATE sent SET msg_id = ? WHERE user_id = ? AND ref = ? AND date = ?', [(int) $res['result']['message_id'], $uid, 'n:xufton', $y]);
+            }
+            $stat['repeat']++;
+        }
     }
 }
 
